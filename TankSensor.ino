@@ -14,25 +14,17 @@
 //#include <FS.h>
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
-#define JSON_STATIC_BUFSIZE	2048
-StaticJsonBuffer<JSON_STATIC_BUFSIZE> jsonBuffer;
 
 #define _JSON_DATA_FILE			"DATA.JSN"
-#define _JSON_DATA_SEPARATOR	'|'
+#define _JSON_DATA_SEPARATOR	'\n'
 
 
 #define _SAMPLE_INTERVAL_S	10
 #define _SAMPLES_PER_BULK	2
 
+//#define _NO_HTTP
 
-//#define _USE_SD
-#define _USE_SD_MIN
-
-#if defined(_USE_SD) || defined(_USE_SD_MIN)
 #include <SD.h>
-#endif
-
-#define _NO_HTTP
 
 //#define _TRY_PING
 #ifdef _TRY_PING
@@ -44,8 +36,8 @@ StaticJsonBuffer<JSON_STATIC_BUFSIZE> jsonBuffer;
 //#define USE_BMP
 
 // my libs
-#include <bjfWifi.h>
-bjfWifi wifiInstance;
+#include <myWifi.h>
+myWifiClass wifiInstance;
 
 
 #ifdef USE_BMP
@@ -85,8 +77,8 @@ BME280I2C bme(mySettings);
 
 #endif
 
-bjfWifi::wifiDetails thisDetails = {
-	"beige","0404407219",true,false,IPAddress(192,168,42,105),IPAddress(255,255,255,0),IPAddress(192,168,42,250)
+myWifiClass::wifiDetails thisDetails = {
+	"beige","0404407219",true,true,IPAddress(192,168,42,105),IPAddress(255,255,255,0),IPAddress(192,168,42,250)
 };
 
 #define _CLEAR_DATA
@@ -94,18 +86,16 @@ bjfWifi::wifiDetails thisDetails = {
 // the setup function runs once when you press reset or power the board
 void setup() {
 
-	Serial.begin(9600);
+	Serial.begin(115200);
 	///Serial.setTimeout(2000);
 
 	delay(1000);
 
-	pinMode(D3, OUTPUT);
+	Serial.println("I'm awake. Sleeping for 10s");
+	delay(10000);
 
-	Serial.println("I'm awake.");
+	wifiInstance.ConnectWifi(myWifiClass::modeSTA, thisDetails);
 
-	wifiInstance.ConnectWifi(bjfWifi::modeSTA, thisDetails);
-
-#if defined( _USE_SD_MIN ) || defined (_USE_SD)
 	if (!SD.begin(D8))
 	{
 		DEBUG(DEBUG_ERROR,Serial.println("SD card failed"));
@@ -114,14 +104,11 @@ void setup() {
 	{
 		DEBUG(DEBUG_VERBOSE, Serial.printf("SDFile is %d bytes\n\r", sizeof(SdFile)));
 	}
-#endif
 
 #ifdef  _CLEAR_DATA
 
-#if defined(_USE_SD) || defined(_USE_SD_MIN)
 	SD.remove(_JSON_CONFIG_FILE);
 	SD.remove(_JSON_DATA_FILE);
-#endif
 
 #endif //  _CLEAR_DATA
 
@@ -181,7 +168,6 @@ struct {
 bool readConfig()
 {
 
-#if  defined (_USE_SD_MIN)
 
 	DEBUG(DEBUG_VERBOSE, Serial.println("reading config"));
 
@@ -199,7 +185,7 @@ bool readConfig()
 
 	configFile.close();
 
-	StaticJsonBuffer<JSON_STATIC_BUFSIZE> jsonBuffer;
+	DynamicJsonBuffer jsonBuffer;
 
 	JsonObject &root = jsonBuffer.parseObject(configText);
 
@@ -207,8 +193,9 @@ bool readConfig()
 	config.version = root["version"];
 	config.samplePeriod = root["samplePeriod"];
 
+	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer readconfig size %d\n\r", jsonBuffer.size()));
+
 	DEBUG(DEBUG_VERBOSE, Serial.println(configText));
-#endif
 
 
 	return true;
@@ -216,11 +203,10 @@ bool readConfig()
 
 bool writeConfig()
 {
-#if defined (_USE_SD_MIN)
 
 	DEBUG(DEBUG_VERBOSE, Serial.printf("writing config %d \n\r", ESP.getFreeHeap()));
 
-	StaticJsonBuffer<JSON_STATIC_BUFSIZE> jsonBuffer;
+	DynamicJsonBuffer jsonBuffer;
 
 	JsonObject &root = jsonBuffer.createObject();
 	root["version"] = config.version;
@@ -231,12 +217,10 @@ bool writeConfig()
 	root.printTo(jsonText);
 
 	File configFile = SD.open(_JSON_CONFIG_FILE, O_WRITE | O_CREAT | O_TRUNC);
-	//File configFile = SD.open(_JSON_CONFIG_FILE, FILE_WRITE | O_APPEND);
 
 
 	if (!configFile)
 	{
-		configFile.close();
 		DEBUG(DEBUG_ERROR, Serial.println("could not create config"));
 		return false;
 	}
@@ -249,9 +233,9 @@ bool writeConfig()
 
 	configFile.close();
 
+	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer writeconfig size %d\n\r", jsonBuffer.size()));
 	DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
 	DEBUG(DEBUG_VERBOSE, Serial.println("written"));
-#endif
 
 	return true;
 
@@ -262,7 +246,6 @@ bool writeConfig()
 bool appendData(JsonObject &data)
 {
 
-#ifdef _USE_SD_MIN
 
 	DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
 
@@ -279,13 +262,10 @@ bool appendData(JsonObject &data)
 	DEBUG(DEBUG_VERBOSE, Serial.println(dataText));
 
 	dataFile.println(dataText.c_str());
-	dataFile.write(_JSON_DATA_SEPARATOR);
 	DEBUG(DEBUG_VERBOSE, Serial.println("written"));
 
 
 	dataFile.close();
-
-#endif
 
 	return true;
 }
@@ -304,14 +284,16 @@ void GoToSleep(unsigned seconds)
 
 
 
+DynamicJsonBuffer jsonHTTPsend;
+
+
 
 
 // the loop function runs over and over again until power down or reset
 void loop() 
 {
-	unsigned long millisAtStart = millis();
 
-	digitalWrite(D3, HIGH);
+	unsigned long millisAtStart = millis();
 
 	DEBUG(DEBUG_INFO, Serial.printf("IP address: %s GW %s\n\r", WiFi.localIP().toString().c_str(),WiFi.gatewayIP().toString().c_str()));
 
@@ -325,55 +307,33 @@ void loop()
 	bme.read(pressure, temp, humidity);
 #endif
 
-	DEBUG(DEBUG_VERBOSE, Serial.printf("%f %f %f\n\r",pressure,temp,humidity));
-
-	// first, append this to the back of the dump
-	jsonBuffer.clear();
-	JsonObject &data = jsonBuffer.createObject();
-
-
-
-	data["sent"] = 0;
-	data["iter"] = ++config.iteration;
-	data["distCM"] = readDistanceCMS();
-	data["tempC"] = temp;
-	data["humid%"] = humidity;
-	data["pressMB"] = pressure;
-
-//	appendData(data);
-
-	DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
-
-	File dataFile = SD.open(_JSON_DATA_FILE, FILE_WRITE | O_APPEND);
-	if (dataFile)
+	// false scope to kill the json buffer
 	{
+		// first, append this to the back of the dump
+		DynamicJsonBuffer jsonBuffer;
+		JsonObject &data = jsonBuffer.createObject();
 
-	String dataText;
-	data.printTo(dataText);
-	DEBUG(DEBUG_VERBOSE, Serial.println(dataText));
+		data["iter"] = ++config.iteration;
+		data["distCM"] = readDistanceCMS();
+		data["tempC"] = temp;
+		data["humid%"] = humidity;
+		data["pressMB"] = pressure;
 
-	dataFile.println(dataText.c_str());
-	dataFile.write(_JSON_DATA_SEPARATOR);
-	DEBUG(DEBUG_VERBOSE, Serial.println("written"));
+		DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
+		DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size()));
 
-	}
-	else
-	{
-		dataFile.close();
-		DEBUG(DEBUG_ERROR, Serial.println("could not create data"));
+		appendData(data);
 	}
 
 
-
-
-
-	if(dataFile && (WiFi.status() == WL_CONNECTED))
+	if ((WiFi.status() == WL_CONNECTED))
 	{
-		dataFile.flush();
-		dataFile.seek(SEEK_SET);
 
+#if defined (_TRY_PING) || !defined (_NO_HTTP)
 		// end server
-		IPAddress pyHost(192,168,43,18);
+		IPAddress pyHost(192, 168, 43, 18);
+
+#endif
 
 #ifdef _TRY_PING
 		if (Ping.ping(pyHost))
@@ -386,79 +346,127 @@ void loop()
 		}
 #endif
 
-#ifdef _USE_SD_MIN
+		File dataFile = SD.open(_JSON_DATA_FILE, FILE_READ);
+
 
 		if (dataFile)
 		{
-			jsonBuffer.clear();
-			JsonObject &root = jsonBuffer.createObject();
-			JsonArray &dataArray = root.createNestedArray("data");
+			jsonHTTPsend.clear();
+			JsonObject &root = jsonHTTPsend.createObject();
 
 			root["host"] = wifiInstance.m_hostName.c_str();
 			root["intervalS"] = config.samplePeriod;
+			root["current"] = config.iteration;
+
+			JsonArray &dataArray = root.createNestedArray("data");
 
 			unsigned long lastIterSeen = 0;
-
-			for (int loopCount = 0; loopCount < 5 && dataFile.available(); loopCount++)
+			for (int loopCount = 0; (loopCount < 5) && dataFile.available(); loopCount++)
 			{
+				// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
+				yield();
 
 				String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
 
-				DEBUG(DEBUG_VERBOSE, Serial.printf("%d %s\n\r", loopCount, jsonText.c_str()));
+				DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount+1, jsonText.length(), jsonText.c_str()));
 
-				StaticJsonBuffer<1024> temp;
+				DynamicJsonBuffer temp;
 				JsonObject &readData = temp.parse(jsonText);
+				DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
 
-				lastIterSeen = readData["iter"];
-
-				if (lastIterSeen > config.iterationSent)
+				if (readData.success())
 				{
-					JsonObject &data = dataArray.createNestedObject();
-					data["iter"] = readData["iter"];
-					data["distCM"] = readData["distCM"];
-					data["tempC"] = readData["tempC"];
-					data["humid%"] = readData["humid%"];
-					data["pressMB"] = readData["pressMB"];
 
+					lastIterSeen = readData["iter"];
+
+					if (lastIterSeen > config.iterationSent)
+					{
+						JsonObject &data = dataArray.createNestedObject();
+
+						// cloning between objetcs is 'hard' so go via intermediate var
+
+						unsigned long a;
+						float b, c, d, e;
+
+						data["iter"] =a= readData["iter"];
+						data["distCM"] =b= readData["distCM"];
+						data["tempC"] =c= readData["tempC"];
+						data["humid%"] =d= readData["humid%"];
+						data["pressMB"] =e= readData["pressMB"];
+
+					}
 				}
+				else
+				{
+					DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse"));
+				}
+
 			}
+
+			DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size()));
+
+			yield();
+
+#define _JSON_BODY_LEN 500
+
+			bool flagDataFileForDelete = false;
+			{
+				// done here as an array because using a String causes a WDT reset 
+				//char *body=new char[_JSON_BODY_LEN];
+				//size_t width=root.printTo(body, _JSON_BODY_LEN);
+
+				String *body = new String();
+				size_t width = root.printTo(*body);
 
 #ifndef _NO_HTTP
+				DEBUG(DEBUG_VERBOSE,Serial.printf("JSON length = %d\n\r", width));
+				DEBUG(DEBUG_VERBOSE,Serial.println(*body));
+				int httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
+				HTTPClient http;
+				http.setTimeout(30);
 
-			String body;
-			root.printTo(body);
-			Serial.printf("JSON length = %d\n\r", body.length());
-			Serial.println(body);
-			int httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
-			HTTPClient http;
-			http.setTimeout(30);
-			if (http.begin(pyHost.toString().c_str(), 5000, "/data"))
-			{
+				if (http.begin(pyHost.toString().c_str(), 5000, "/data"))
+				{
+					DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
 
-				http.addHeader("Content-Type", "application/json");
-				httpCode = http.POST(body);
+					http.addHeader("Content-Type", "application/json");
+					httpCode = http.POST(*body);
 
-				Serial.printf("Post result %d\n\r", httpCode);
+					DEBUG(DEBUG_VERBOSE, Serial.printf("Post result %d\n\r", httpCode));
 
-				http.end();
-			}
-			else
-			{
-				Serial.println("http failed");
-			}
+					http.end();
+				}
+				else
+				{
+					DEBUG(DEBUG_IMPORTANT, Serial.println("http.begin failed"));
+				}
 
-			switch (httpCode)
-			{
-			case HTTP_CODE_OK:
-			case HTTP_CODE_PROCESSING:
-				config.iterationSent = lastIterSeen;
-				break;
-			default:
-				Serial.println("retry later");
-				break;
-			}
-
+				switch (httpCode)
+				{
+				case HTTP_CODE_OK:
+				case HTTP_CODE_PROCESSING:
+					config.iterationSent = lastIterSeen;
+					if (!dataFile.available() && config.iterationSent==config.iteration)
+					{
+						flagDataFileForDelete = true;
+					}
+					break;
+				default:
+					DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
+					break;
+				}
 #endif
+				delete body;
+			}
+
+			dataFile.close();
+			// if there's nothing left in the file, kill it
+			if (flagDataFileForDelete)
+			{
+				SD.remove(_JSON_DATA_FILE);
+				DEBUG(DEBUG_INFO, Serial.println("Killing data file"));
+			}
+
 
 
 		}
@@ -468,24 +476,14 @@ void loop()
 		}
 
 
-
-#endif
-
-
-
-
-
-
-
-	}	
+	}
 	else
 	{
-		Serial.println("wifi failed");
+		DEBUG(DEBUG_ERROR, Serial.println("could not create data"));
 	}
 
-	dataFile.close();
 
-	digitalWrite(D3, LOW);
+
 
 	writeConfig();
 
@@ -493,7 +491,7 @@ void loop()
 
 	unsigned long millisToSleep = (config.samplePeriod * 1000) - (millisAtEnd - millisAtStart);
 
-	Serial.printf("Sleeping for %lu ms\n\r", millisToSleep);
+	DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu ms\n\r", millisToSleep));
 
 	delay(millisToSleep);
 

@@ -11,18 +11,16 @@
 #include <WiFiClient.h>
 
 #include <ArduinoJson.h>
-//#include <FS.h>
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
 #define _JSON_DATA_FILE			"DATA.JSN"
 #define _JSON_DATA_SEPARATOR	'\n'
 
+#define _JSON_BODY_LEN 500
 
-#define _SAMPLE_INTERVAL_S	10
-#define _SAMPLES_PER_BULK	2
+#define _SAMPLE_INTERVAL_S	(60*5)
 
-//#define _NO_HTTP
 
 #include <SD.h>
 
@@ -33,18 +31,12 @@
 
 #include <Wire.h>
 
-//#define USE_BMP
 
 // my libs
 #include <myWifi.h>
 myWifiClass wifiInstance;
 
 
-#ifdef USE_BMP
-#include <BMP280.h>
-
-BMP280 bmp;
-#else
 
 #include <BME280I2C.h>
 
@@ -65,7 +57,6 @@ BME280I2C::Settings mySettings = {
 
 
 BME280I2C bme(mySettings);
-#endif
 
 
 
@@ -73,12 +64,12 @@ BME280I2C bme(mySettings);
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
 // how long to sleep
-#define _SLEEP_SECONDS	25
+#define _SLEEP_SECONDS	_SAMPLE_INTERVAL_S
 
 #endif
 
 myWifiClass::wifiDetails thisDetails = {
-	"beige","0404407219",true,true,IPAddress(192,168,42,105),IPAddress(255,255,255,0),IPAddress(192,168,42,250)
+	"beige","0404407219",true,false,IPAddress(192,168,42,105),IPAddress(255,255,255,0),IPAddress(192,168,42,250)
 };
 
 #define _CLEAR_DATA
@@ -116,13 +107,6 @@ void setup() {
 
 	readConfig();
 
-#ifdef USE_BMP
-
-	if (!bmp.begin(D2, D1))
-	{
-		Serial.printf("bmp failed %d \r\n",bmp.getError());
-	}
-#else
 
 	Wire.begin(D2, D1);
 	bme.begin();
@@ -139,9 +123,6 @@ void setup() {
 	default:
 		Serial.println("Found UNKNOWN sensor! Error!");
 	}
-
-#endif
-
 
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
@@ -192,6 +173,7 @@ bool readConfig()
 	config.iteration = root["iteration"];
 	config.version = root["version"];
 	config.samplePeriod = root["samplePeriod"];
+	config.iterationSent=root["lastIterSent"];
 
 	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer readconfig size %d\n\r", jsonBuffer.size()));
 
@@ -212,6 +194,7 @@ bool writeConfig()
 	root["version"] = config.version;
 	root["iteration"] = config.iteration;
 	root["samplePeriod"]=config.samplePeriod;
+	root["lastIterSent"] = config.iterationSent;
 
 	String jsonText;
 	root.printTo(jsonText);
@@ -287,7 +270,7 @@ void GoToSleep(unsigned seconds)
 DynamicJsonBuffer jsonHTTPsend;
 
 
-
+#define _PY_PORT	5000
 
 // the loop function runs over and over again until power down or reset
 void loop() 
@@ -298,42 +281,143 @@ void loop()
 	DEBUG(DEBUG_INFO, Serial.printf("IP address: %s GW %s\n\r", WiFi.localIP().toString().c_str(),WiFi.gatewayIP().toString().c_str()));
 
 
+	// end server
+	IPAddress pyHost(192, 168, 43, 22);
 
-#ifdef USE_BMP
-	double pressure = 1, temp = 2, humidity = 3;
-	bmp.getTemperatureAndPressure(temp, pressure);
-#else
+
 	float pressure=1, temp=2, humidity=3;
 	bme.read(pressure, temp, humidity);
-#endif
 
-	// false scope to kill the json buffer
+	// first, append this to the back of the dump
+	DynamicJsonBuffer jsonBuffer;
+	JsonObject &dataNow = jsonBuffer.createObject();
+
+	dataNow["iter"] = ++config.iteration;
+	dataNow["distCM"] = readDistanceCMS();
+	dataNow["tempC"] = temp;
+	dataNow["humid%"] = humidity;
+	dataNow["pressMB"] = pressure;
+
+	DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
+	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size()));
+
+	// if we're not connected, or if the datafile ALREADY exists, append this blob onto the back
+	if ((WiFi.status() != WL_CONNECTED) || SD.exists(_JSON_DATA_FILE))
 	{
-		// first, append this to the back of the dump
-		DynamicJsonBuffer jsonBuffer;
-		JsonObject &data = jsonBuffer.createObject();
+		// append
+		appendData(dataNow);
 
-		data["iter"] = ++config.iteration;
-		data["distCM"] = readDistanceCMS();
-		data["tempC"] = temp;
-		data["humid%"] = humidity;
-		data["pressMB"] = pressure;
+		// then deal with the data file, if we are connected
+		if ((WiFi.status() == WL_CONNECTED))
+		{
+			SendCachedData(pyHost, _PY_PORT);
+		}
 
-		DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
-		DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size()));
+	}
+	else
+	{
+		// try to send this blob
+		jsonHTTPsend.clear();
+		JsonObject &root = jsonHTTPsend.createObject();
 
-		appendData(data);
+		root["host"] = wifiInstance.m_hostName.c_str();
+		root["intervalS"] = config.samplePeriod;
+		root["current"] = config.iteration;
+
+		JsonArray &dataArray = root.createNestedArray("data");
+
+		unsigned long a;
+		float b, c, d, e;
+
+		JsonObject &data = dataArray.createNestedObject();
+
+		data["iter"] = a = dataNow["iter"];
+		data["distCM"] = b = dataNow["distCM"];
+		data["tempC"] = c = dataNow["tempC"];
+		data["humid%"] = d = dataNow["humid%"];
+		data["pressMB"] = e = dataNow["pressMB"];
+
+		int httpCode = SendToHost(pyHost, _PY_PORT, root);
+
+		switch (httpCode)
+		{
+		case HTTP_CODE_OK:
+		case HTTP_CODE_PROCESSING:
+			config.iterationSent = config.iteration;;
+			break;
+		default:
+			DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
+			appendData(dataNow);
+			break;
+		}
+
+
 	}
 
 
+	writeConfig();
+
+	unsigned long millisAtEnd = millis();
+
+	unsigned long millisToSleep = (config.samplePeriod * 1000) - (millisAtEnd - millisAtStart);
+
+	DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu ms\n\r", millisToSleep));
+
+	delay(millisToSleep);
+
+}
+
+// use the A-D voltage
+float readDistanceCMS()
+{
+	// long way round
+	//float ana = analogRead(A0);
+	//float anaV = 3.3 * (ana / 1024);
+	//float scale = 3.3 / 512.0;
+	//float theRange = (anaV/scale)*2.54;
+	return (analogRead(A0) / 2)*2.54;
+}
+
+
+int SendToHost(IPAddress &host, unsigned port, JsonObject &blob)
+{
+
+	String *body = new String();
+	size_t width = blob.printTo(*body);
+
+	DEBUG(DEBUG_VERBOSE, Serial.printf("JSON length = %d\n\r", width));
+	DEBUG(DEBUG_VERBOSE, Serial.println(*body));
+	int httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
+	HTTPClient http;
+	http.setTimeout(30);
+
+	if (http.begin(host.toString().c_str(), port, "/data"))
+	{
+		DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
+
+		http.addHeader("Content-Type", "application/json");
+		httpCode = http.POST(*body);
+
+		DEBUG(DEBUG_VERBOSE, Serial.printf("Post result %d\n\r", httpCode));
+
+		http.end();
+	}
+	else
+	{
+		DEBUG(DEBUG_IMPORTANT, Serial.println("http.begin failed"));
+		httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
+	}
+	delete body;
+
+	return httpCode;
+
+}
+
+bool SendCachedData(IPAddress &pyHost, unsigned port)
+{
 	if ((WiFi.status() == WL_CONNECTED))
 	{
 
-#if defined (_TRY_PING) || !defined (_NO_HTTP)
-		// end server
-		IPAddress pyHost(192, 168, 43, 18);
-
-#endif
 
 #ifdef _TRY_PING
 		if (Ping.ping(pyHost))
@@ -361,14 +445,13 @@ void loop()
 			JsonArray &dataArray = root.createNestedArray("data");
 
 			unsigned long lastIterSeen = 0;
-			for (int loopCount = 0; (loopCount < 5) && dataFile.available(); loopCount++)
+			for (int loopCount = 0; (loopCount < 5) && dataFile.available(); )
 			{
 				// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
 				yield();
 
 				String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
 
-				DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount+1, jsonText.length(), jsonText.c_str()));
 
 				DynamicJsonBuffer temp;
 				JsonObject &readData = temp.parse(jsonText);
@@ -381,19 +464,22 @@ void loop()
 
 					if (lastIterSeen > config.iterationSent)
 					{
+						DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
+
 						JsonObject &data = dataArray.createNestedObject();
 
-						// cloning between objetcs is 'hard' so go via intermediate var
+						// cloning between objects is 'hard' so go via intermediate var
 
 						unsigned long a;
 						float b, c, d, e;
 
-						data["iter"] =a= readData["iter"];
-						data["distCM"] =b= readData["distCM"];
-						data["tempC"] =c= readData["tempC"];
-						data["humid%"] =d= readData["humid%"];
-						data["pressMB"] =e= readData["pressMB"];
+						data["iter"] = a = readData["iter"];
+						data["distCM"] = b = readData["distCM"];
+						data["tempC"] = c = readData["tempC"];
+						data["humid%"] = d = readData["humid%"];
+						data["pressMB"] = e = readData["pressMB"];
 
+						loopCount++;
 					}
 				}
 				else
@@ -407,46 +493,17 @@ void loop()
 
 			yield();
 
-#define _JSON_BODY_LEN 500
 
 			bool flagDataFileForDelete = false;
 			{
-				// done here as an array because using a String causes a WDT reset 
-				//char *body=new char[_JSON_BODY_LEN];
-				//size_t width=root.printTo(body, _JSON_BODY_LEN);
-
-				String *body = new String();
-				size_t width = root.printTo(*body);
-
-#ifndef _NO_HTTP
-				DEBUG(DEBUG_VERBOSE,Serial.printf("JSON length = %d\n\r", width));
-				DEBUG(DEBUG_VERBOSE,Serial.println(*body));
-				int httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
-				HTTPClient http;
-				http.setTimeout(30);
-
-				if (http.begin(pyHost.toString().c_str(), 5000, "/data"))
-				{
-					DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
-
-					http.addHeader("Content-Type", "application/json");
-					httpCode = http.POST(*body);
-
-					DEBUG(DEBUG_VERBOSE, Serial.printf("Post result %d\n\r", httpCode));
-
-					http.end();
-				}
-				else
-				{
-					DEBUG(DEBUG_IMPORTANT, Serial.println("http.begin failed"));
-				}
+				int httpCode = SendToHost(pyHost, port, root);
 
 				switch (httpCode)
 				{
 				case HTTP_CODE_OK:
 				case HTTP_CODE_PROCESSING:
 					config.iterationSent = lastIterSeen;
-					if (!dataFile.available() && config.iterationSent==config.iteration)
+					if (!dataFile.available() && config.iterationSent == config.iteration)
 					{
 						flagDataFileForDelete = true;
 					}
@@ -455,8 +512,7 @@ void loop()
 					DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
 					break;
 				}
-#endif
-				delete body;
+
 			}
 
 			dataFile.close();
@@ -473,71 +529,15 @@ void loop()
 		else
 		{
 			DEBUG(DEBUG_IMPORTANT, Serial.println("Could not open data"));
+			return false;
 		}
-
-
 	}
 	else
 	{
-		DEBUG(DEBUG_ERROR, Serial.println("could not create data"));
+		DEBUG(DEBUG_ERROR, Serial.println("not connected"));
+		return false;
 	}
 
-
-
-
-	writeConfig();
-
-	unsigned long millisAtEnd = millis();
-
-	unsigned long millisToSleep = (config.samplePeriod * 1000) - (millisAtEnd - millisAtStart);
-
-	DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu ms\n\r", millisToSleep));
-
-	delay(millisToSleep);
+	return true;
 
 }
-
-// use the A-D voltage
-float readDistanceCMS()
-{
-	// long way round
-	//float ana = analogRead(A0);
-	//float anaV = 3.3 * (ana / 1024);
-	//float scale = 3.3 / 512.0;
-	//float theRange = (anaV/scale)*2.54;
-	return (analogRead(A0) / 2)*2.54;
-}
-
-#ifdef USE_BMP
-
-void readTandP()
-{
-	double T, P;
-	char result = bmp.startMeasurment();
-
-	if (result != 0) {
-		delay(result);
-		result = bmp.getTemperatureAndPressure(T, P);
-
-		if (result != 0)
-		{
-			//double A = bmp.altitude(P, P0);
-
-			Serial.print("T = \t"); Serial.print(T, 2); Serial.print(" degC\t");
-			Serial.print("P = \t"); Serial.print(P, 2); Serial.print(" mBar\t");
-			//Serial.print("A = \t"); Serial.print(A, 2); Serial.println(" m");
-
-		}
-		else {
-			Serial.printf("Error2. %d\n\r",bmp.getError());
-		}
-	}
-	else {
-		Serial.printf("Error1. %d\n\r", bmp.getError());
-	}
-
-	Serial.println();
-}
-
-#endif
-

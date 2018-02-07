@@ -21,10 +21,14 @@
 
 #define _SAMPLE_INTERVAL_S	(60*5)
 
+#define _SPIFF_RESET_FLAG_FILE	"/reset.txt"
 
 #include <SD.h>
 
-//#define _TRY_PING
+#define FS_NO_GLOBALS	// turn off the 'Using'
+#include <FS.h>
+
+#define _TRY_PING
 #ifdef _TRY_PING
 #include <ESP8266Ping.h>
 #endif
@@ -34,7 +38,7 @@
 
 // my libs
 #include <myWifi.h>
-myWifiClass wifiInstance;
+myWifiClass wifiInstance("wemos_");
 
 
 
@@ -54,9 +58,32 @@ BME280I2C::Settings mySettings = {
 
 };
 
-
-
 BME280I2C bme(mySettings);
+
+
+struct {
+	unsigned version;
+	unsigned long iteration, iterationSent;
+	unsigned long samplePeriod;
+
+	// wifi deets
+	myWifiClass::wifiDetails wifi;
+
+	IPAddress postHost;
+	unsigned postHostPort;
+
+} config =
+{
+	0,					// ver
+	0,0,				// iters
+	_SAMPLE_INTERVAL_S,
+	{
+		"","",false,true,IPAddress(),IPAddress(),IPAddress()
+	},
+	IPAddress(),5000
+
+};
+
 
 
 
@@ -68,9 +95,6 @@ BME280I2C bme(mySettings);
 
 #endif
 
-myWifiClass::wifiDetails thisDetails = {
-	"beige","0404407219",true,false,IPAddress(192,168,42,105),IPAddress(255,255,255,0),IPAddress(192,168,42,250)
-};
 
 //#define _CLEAR_DATA
 
@@ -95,7 +119,6 @@ void setup() {
 	DEBUG(DEBUG_VERBOSE, Serial.println("I'm REALLY awake."));
 	digitalWrite(TRAN_PIN, HIGH);
 
-	wifiInstance.ConnectWifi(myWifiClass::modeSTA, thisDetails);
 
 	// see comment for TRAN_PIN
 	if (!SD.begin(D4))
@@ -103,17 +126,171 @@ void setup() {
 		DEBUG(DEBUG_ERROR,Serial.println("SD card failed"));
 	}
 
-#ifdef  _CLEAR_DATA
+	if(!SPIFFS.begin())
+	{
+		DEBUG(DEBUG_ERROR, Serial.println("SPIFFS failed"));
+	}
 
-	SD.remove(_JSON_CONFIG_FILE);
-	SD.remove(_JSON_DATA_FILE);
-
-#endif //  _CLEAR_DATA
+	// special case
+	if (SPIFFS.exists(_SPIFF_RESET_FLAG_FILE))
+	{
+		DEBUG(DEBUG_IMPORTANT, Serial.println("Resetting"));
+		SD.remove(_JSON_CONFIG_FILE);
+		SD.remove(_JSON_DATA_FILE);
+		SPIFFS.remove(_SPIFF_RESET_FLAG_FILE);
+	}
 
 
 
 	readConfig();
 
+	// if we haven't been configured, wake up and offer a webserver to configure us
+	if (!config.wifi.configured)
+	{
+		wifiInstance.ConnectWifi(myWifiClass::modeAP, config.wifi);
+
+		// begin the servers
+		DEBUG(DEBUG_VERBOSE, Serial.println("serving static pages"));
+
+		wifiInstance.server.on("/", HTTP_GET, []() {
+
+			fs::File f = SPIFFS.open("/APmode.htm", "r");
+			wifiInstance.server.streamFile(f, "text/html");
+			f.close();
+
+		});
+
+
+		wifiInstance.server.on("/json/config", HTTP_GET, []() {
+			// give them back the port / switch map
+
+			DEBUG(DEBUG_INFO, Serial.println("json config called"));
+
+			DynamicJsonBuffer jsonBuffer;
+
+			JsonObject &root = jsonBuffer.createObject();
+
+			root["name"] = wifiInstance.m_hostName.c_str();
+
+			String jsonText;
+			root.prettyPrintTo(jsonText);
+
+			DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
+
+			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+			wifiInstance.server.send(200, "application/json", jsonText);
+		});
+
+		wifiInstance.server.on("/json/wifi", HTTP_GET, []() {
+			// give them back the port / switch map
+
+			DEBUG(DEBUG_INFO, Serial.println("json wifi called"));
+
+			DynamicJsonBuffer jsonBuffer;
+
+			JsonObject &root = jsonBuffer.createObject();
+			root["name"] = wifiInstance.m_hostName.c_str();
+			JsonArray &wifis = root.createNestedArray("wifi");
+
+			// let's get all wifis we can see
+			std::vector<std::pair<String, int>> allWifis;
+			int found = wifiInstance.ScanNetworks(allWifis);
+
+			int maxFound = found < 10 ? found : 10;
+
+			for (int each = 0; each < maxFound; each++)
+			{
+				JsonObject &wifi = wifis.createNestedObject();
+				wifi["ssid"] = allWifis[each].first;
+				wifi["sig"] = allWifis[each].second;
+
+				DEBUG(DEBUG_INFO, Serial.printf("%d '%s' %d \n\r", each + 1, allWifis[each].first.c_str(), allWifis[each].second));
+
+			}
+
+			root["hostport"] = config.postHostPort;
+			root["period"] = config.samplePeriod;
+
+
+			String jsonText;
+			root.prettyPrintTo(jsonText);
+
+			DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
+
+			// do not cache
+			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+			wifiInstance.server.send(200, "text/json", jsonText);
+		});
+
+		wifiInstance.server.on("/json/wifi", HTTP_POST, []() {
+
+			DEBUG(DEBUG_INFO, Serial.println("json wifi posted"));
+			DEBUG(DEBUG_INFO, Serial.println(wifiInstance.server.arg("plain")));
+
+			DynamicJsonBuffer jsonBuffer;
+			// 'plain' is the secret source to get to the body
+			JsonObject& root = jsonBuffer.parseObject(wifiInstance.server.arg("plain"));
+
+			String ssid = root["ssid"];
+			String pwd = root["pwd"];
+
+			// sanity check these values
+
+			config.wifi.ssid = ssid;
+			config.wifi.password = pwd;
+
+			// dhcp or static?
+			if (root["dhcp"] == 1)
+			{
+				config.wifi.dhcp = true;
+			}
+			else
+			{
+				config.wifi.dhcp = false;
+				config.wifi.ip.fromString((const char*)root["ip"]);
+				config.wifi.gateway.fromString((const char*)root["gateway"]);
+				config.wifi.netmask.fromString((const char*)root["netmask"]);
+			}
+
+			config.postHost.fromString((const char*)root["loghost"]);
+			config.postHostPort = root["loghostport"];
+			config.samplePeriod = root["loghostperiod"];
+
+			// force attempt
+			// if we fail we fall back to AP
+			if (wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeSTAspeculative, config.wifi) == myWifiClass::wifiMode::modeSTA)
+			{
+				config.wifi.configured = true;
+			}
+			else
+			{
+				config.wifi.configured = false;
+			}
+
+			// and update json
+			writeConfig();
+		});
+
+
+
+		// serve up everthing in SPIFFS
+		SPIFFS.openDir("/");
+
+		fs::Dir dir = SPIFFS.openDir("/");
+		while (dir.next()) {
+			String file = dir.fileName();
+
+			// cache it for an hour
+			wifiInstance.server.serveStatic(file.c_str(), SPIFFS, file.c_str(), "Cache-Control: public, max-age=60");
+
+			DEBUG(DEBUG_VERBOSE, Serial.printf("Serving %s\n\r", file.c_str()));
+
+		}
+	}
+	else
+	{ 
+		wifiInstance.ConnectWifi(myWifiClass::modeSTA, config.wifi);
+	}
 
 	Wire.begin(D2, D1);
 	bme.begin();
@@ -132,31 +309,14 @@ void setup() {
 	}
 
 
-#ifdef _SLEEP_PERCHANCE_TO_DREAM
-
-	GoToSleep(_SLEEP_SECONDS);
-
-#endif
 
 }
 
 
 
-struct {
-	unsigned version;
-	unsigned long iteration, iterationSent;
-	unsigned long samplePeriod;
-} config=
-{
-	0,					// ver
-	0,0,				// iters
-	_SAMPLE_INTERVAL_S
-};
 
 bool readConfig()
 {
-
-
 	DEBUG(DEBUG_VERBOSE, Serial.println("reading config"));
 
 	// try to read the config - if it fails, create the default
@@ -164,7 +324,7 @@ bool readConfig()
 
 	if (!configFile)
 	{
-		//configFile.close();
+		writeConfig();
 		DEBUG(DEBUG_VERBOSE, Serial.println("config file missing"));
 		return false;
 	}
@@ -181,6 +341,12 @@ bool readConfig()
 	config.version = root["version"];
 	config.samplePeriod = root["samplePeriod"];
 	config.iterationSent=root["lastIterSent"];
+
+	wifiInstance.ReadDetailsFromJSON(root, config.wifi);
+
+	config.postHost.fromString((const char*)root["host"]);
+	config.postHostPort = root["hostPort"];
+
 
 	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer readconfig size %d\n\r", jsonBuffer.size()));
 
@@ -202,6 +368,11 @@ bool writeConfig()
 	root["iteration"] = config.iteration;
 	root["samplePeriod"]=config.samplePeriod;
 	root["lastIterSent"] = config.iterationSent;
+
+	wifiInstance.WriteDetailsToJSON(root, config.wifi);
+
+	root["host"] = config.postHost.toString();
+	root["hostPort"] = config.postHostPort;
 
 	String jsonText;
 	root.printTo(jsonText);
@@ -260,14 +431,14 @@ bool appendData(JsonObject &data)
 	return true;
 }
 
-void GoToSleep(unsigned seconds)
+void GoToSleep(unsigned millisseconds)
 {
-	Serial.printf("Going into deep sleep for %d seconds", seconds);
+	Serial.printf("Going into deep sleep for %d seconds", millisseconds);
 
 	// Connect D0 to RST to wake up
 	pinMode(D0, WAKEUP_PULLUP);
 
-	ESP.deepSleep(seconds * 1000000);
+	ESP.deepSleep(millisseconds * 1000);
 
 }
 
@@ -282,6 +453,11 @@ DynamicJsonBuffer jsonHTTPsend;
 // the loop function runs over and over again until power down or reset
 void loop() 
 {
+	if (!config.wifi.configured)
+	{
+		wifiInstance.server.handleClient();
+		return;
+	}
 
 	unsigned long millisAtStart = millis();
 
@@ -370,7 +546,12 @@ void loop()
 
 	DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu ms\n\r", millisToSleep));
 
+
+#ifdef _SLEEP_PERCHANCE_TO_DREAM
+	GoToSleep(millisToSleep);
+#else
 	delay(millisToSleep);
+#endif
 
 }
 
@@ -410,6 +591,24 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob)
 		{
 			DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
 			httpCode = http.POST(*body);
+
+#ifdef  _TRY_PING
+			if (httpCode == HTTPC_ERROR_CONNECTION_REFUSED)
+			{
+#ifdef _TRY_PING
+				if (Ping.ping(host))
+				{
+					DEBUG(DEBUG_IMPORTANT, Serial.println("PING success"));
+				}
+				else
+				{
+					DEBUG(DEBUG_IMPORTANT, Serial.println("PING FAILED"));
+				}
+#endif
+			}
+#endif //  _TRY_PING
+
+
 		}
 
 		DEBUG(DEBUG_VERBOSE, Serial.printf("Post result %d\n\r", httpCode));
@@ -433,16 +632,6 @@ bool SendCachedData(IPAddress &pyHost, unsigned port)
 	{
 
 
-#ifdef _TRY_PING
-		if (Ping.ping(pyHost))
-		{
-			DEBUG(DEBUG_IMPORTANT, Serial.println("PING success"));
-		}
-		else
-		{
-			DEBUG(DEBUG_IMPORTANT, Serial.println("PING FAILED"));
-		}
-#endif
 
 		File dataFile = SD.open(_JSON_DATA_FILE, FILE_READ);
 

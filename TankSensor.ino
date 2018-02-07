@@ -42,12 +42,12 @@ myWifiClass wifiInstance;
 
 BME280I2C::Settings mySettings = {
 
-	/*OSR _tosr =			*/BME280::OSR_X1,
+	/*OSR _tosr =			*/BME280::OSR_X16,
 	/*OSR _hosr =			*/BME280::OSR_X1,
 	/*OSR _posr =			*/BME280::OSR_X1,
 	/*Mode _mode =			*/BME280::Mode_Forced,
 	/*StandbyTime _st =		*/BME280::StandbyTime_1000ms,
-	/*Filter _filter =		*/BME280::Filter_Off,
+	/*Filter _filter =		*/BME280::Filter_16,
 	/*SpiEnable _se =		*/BME280::SpiEnable_False,
 	/*I2CAddr _addr =		*/BME280I2C::I2CAddr_0x76
 
@@ -72,28 +72,35 @@ myWifiClass::wifiDetails thisDetails = {
 	"beige","0404407219",true,false,IPAddress(192,168,42,105),IPAddress(255,255,255,0),IPAddress(192,168,42,250)
 };
 
-#define _CLEAR_DATA
+//#define _CLEAR_DATA
+
+// NOT a mistake - D* is normally slave select for SPI, but i only have one 
+// SPI device, so i'm slaving that to ground and reusing the pin 
+// because i cant use D3/D4 (gpio 0 and 2)
+#define TRAN_PIN	D8
 
 // the setup function runs once when you press reset or power the board
 void setup() {
 
 	Serial.begin(115200);
 	///Serial.setTimeout(2000);
+	pinMode(TRAN_PIN, OUTPUT);
+	digitalWrite(TRAN_PIN, LOW);
 
 	delay(1000);
 
-	Serial.println("I'm awake. Sleeping for 10s");
-	delay(10000);
+
+	//DEBUG(DEBUG_VERBOSE,Serial.println("I'm awake. Snoozing for 10s"));
+	//delay(10000);
+	DEBUG(DEBUG_VERBOSE, Serial.println("I'm REALLY awake."));
+	digitalWrite(TRAN_PIN, HIGH);
 
 	wifiInstance.ConnectWifi(myWifiClass::modeSTA, thisDetails);
 
-	if (!SD.begin(D8))
+	// see comment for TRAN_PIN
+	if (!SD.begin(D4))
 	{
 		DEBUG(DEBUG_ERROR,Serial.println("SD card failed"));
-	}
-	else
-	{
-		DEBUG(DEBUG_VERBOSE, Serial.printf("SDFile is %d bytes\n\r", sizeof(SdFile)));
 	}
 
 #ifdef  _CLEAR_DATA
@@ -389,14 +396,21 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob)
 	DEBUG(DEBUG_VERBOSE, Serial.println(*body));
 	int httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
 	HTTPClient http;
-	http.setTimeout(30);
+	
+	// milliseconds!
+	http.setTimeout(10*1000);
+
 
 	if (http.begin(host.toString().c_str(), port, "/data"))
 	{
-		DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
 
 		http.addHeader("Content-Type", "application/json");
-		httpCode = http.POST(*body);
+
+		for (int retryAttempt = 0; (retryAttempt < 3) && httpCode == HTTPC_ERROR_CONNECTION_REFUSED; retryAttempt++)
+		{
+			DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
+			httpCode = http.POST(*body);
+		}
 
 		DEBUG(DEBUG_VERBOSE, Serial.printf("Post result %d\n\r", httpCode));
 
@@ -435,84 +449,91 @@ bool SendCachedData(IPAddress &pyHost, unsigned port)
 
 		if (dataFile)
 		{
-			jsonHTTPsend.clear();
-			JsonObject &root = jsonHTTPsend.createObject();
-
-			root["host"] = wifiInstance.m_hostName.c_str();
-			root["intervalS"] = config.samplePeriod;
-			root["current"] = config.iteration;
-
-			JsonArray &dataArray = root.createNestedArray("data");
-
 			unsigned long lastIterSeen = 0;
-			for (int loopCount = 0; (loopCount < 5) && dataFile.available(); )
+			bool flagDataFileForDelete = false;
+
 			{
-				// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
+				jsonHTTPsend.clear();
+				JsonObject &root = jsonHTTPsend.createObject();
+
+				root["host"] = wifiInstance.m_hostName.c_str();
+				root["intervalS"] = config.samplePeriod;
+				root["current"] = config.iteration;
+
+				JsonArray &dataArray = root.createNestedArray("data");
+
+				// Google Sheets API has a limit of 500 requests per 100 seconds per project, and 100 requests per 100 seconds per user
+
+
+
+				for (int loopCount = 0; (loopCount < 10) && dataFile.available(); )
+				{
+					// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
+					yield();
+
+					String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
+
+
+					DynamicJsonBuffer temp;
+					JsonObject &readData = temp.parse(jsonText);
+					DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
+
+					if (readData.success())
+					{
+
+						lastIterSeen = readData["iter"];
+
+						if (lastIterSeen > config.iterationSent)
+						{
+							DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
+
+							JsonObject &data = dataArray.createNestedObject();
+
+							// cloning between objects is 'hard' so go via intermediate var
+
+							unsigned long a;
+							float b, c, d, e;
+
+							data["iter"] = a = readData["iter"];
+							data["distCM"] = b = readData["distCM"];
+							data["tempC"] = c = readData["tempC"];
+							data["humid%"] = d = readData["humid%"];
+							data["pressMB"] = e = readData["pressMB"];
+
+							loopCount++;
+						}
+					}
+					else
+					{
+						DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse"));
+					}
+
+				}
+
+				DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size()));
+
 				yield();
 
-				String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
 
-
-				DynamicJsonBuffer temp;
-				JsonObject &readData = temp.parse(jsonText);
-				DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
-
-				if (readData.success())
 				{
+					int httpCode = SendToHost(pyHost, port, root);
 
-					lastIterSeen = readData["iter"];
-
-					if (lastIterSeen > config.iterationSent)
+					switch (httpCode)
 					{
-						DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
-
-						JsonObject &data = dataArray.createNestedObject();
-
-						// cloning between objects is 'hard' so go via intermediate var
-
-						unsigned long a;
-						float b, c, d, e;
-
-						data["iter"] = a = readData["iter"];
-						data["distCM"] = b = readData["distCM"];
-						data["tempC"] = c = readData["tempC"];
-						data["humid%"] = d = readData["humid%"];
-						data["pressMB"] = e = readData["pressMB"];
-
-						loopCount++;
+					case HTTP_CODE_OK:
+					case HTTP_CODE_PROCESSING:
+						config.iterationSent = lastIterSeen;
+						if (!dataFile.available() && config.iterationSent == config.iteration)
+						{
+							flagDataFileForDelete = true;
+						}
+						break;
+					default:
+						DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
+						break;
 					}
+
 				}
-				else
-				{
-					DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse"));
-				}
-
-			}
-
-			DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size()));
-
-			yield();
-
-
-			bool flagDataFileForDelete = false;
-			{
-				int httpCode = SendToHost(pyHost, port, root);
-
-				switch (httpCode)
-				{
-				case HTTP_CODE_OK:
-				case HTTP_CODE_PROCESSING:
-					config.iterationSent = lastIterSeen;
-					if (!dataFile.available() && config.iterationSent == config.iteration)
-					{
-						flagDataFileForDelete = true;
-					}
-					break;
-				default:
-					DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
-					break;
-				}
-
 			}
 
 			dataFile.close();

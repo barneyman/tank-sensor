@@ -7,10 +7,12 @@
 #include <SPI.h>
 #include <ESP8266HTTPClient.h>
 #include <hardwareSerial.h>
-
+#include <ESP8266httpUpdate.h>
 #include <WiFiClient.h>
 
 #include <ArduinoJson.h>
+
+#define _MYVERSION	"tank_1.3"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -19,7 +21,8 @@
 
 #define _JSON_BODY_LEN 500
 
-#define _SAMPLE_INTERVAL_S	(60*5)
+// default sample period - 15 mins
+#define _SAMPLE_INTERVAL_S	(60*15)
 
 #define _SPIFF_RESET_FLAG_FILE	"/reset.txt"
 
@@ -28,10 +31,12 @@
 #define FS_NO_GLOBALS	// turn off the 'Using'
 #include <FS.h>
 
-#define _TRY_PING
-#ifdef _TRY_PING
+// enable this define for deepsleep (RST and D0 must be connected)
+#define _SLEEP_PERCHANCE_TO_DREAM
+
+
+//#define _TRY_PING
 #include <ESP8266Ping.h>
-#endif
 
 #include <Wire.h>
 
@@ -87,14 +92,10 @@ struct {
 
 
 
-//#define _SLEEP_PERCHANCE_TO_DREAM
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
-// how long to sleep
-#define _SLEEP_SECONDS	_SAMPLE_INTERVAL_S
-
+unsigned long millisAtBoot = millis();
 #endif
-
 
 //#define _CLEAR_DATA
 
@@ -111,12 +112,7 @@ void setup() {
 	pinMode(TRAN_PIN, OUTPUT);
 	digitalWrite(TRAN_PIN, LOW);
 
-	delay(1000);
-
-
-	//DEBUG(DEBUG_VERBOSE,Serial.println("I'm awake. Snoozing for 10s"));
-	//delay(10000);
-	DEBUG(DEBUG_VERBOSE, Serial.println("I'm REALLY awake."));
+	DEBUG(DEBUG_IMPORTANT, Serial.printf("Awake. version %s\n\r",_MYVERSION));
 	digitalWrite(TRAN_PIN, HIGH);
 
 
@@ -154,12 +150,30 @@ void setup() {
 
 		wifiInstance.server.on("/", HTTP_GET, []() {
 
-			fs::File f = SPIFFS.open("/APmode.htm", "r");
+			fs::File f;
+			if(wifiInstance.currentMode!=myWifiClass::wifiMode::modeSTAandAP)
+				f = SPIFFS.open("/APmode.htm", "r");
+			else
+				f = SPIFFS.open("/STAAPmode.htm", "r");
 			wifiInstance.server.streamFile(f, "text/html");
 			f.close();
 
 		});
 
+		wifiInstance.server.on("/stopAP", []() {
+
+			DEBUG(DEBUG_VERBOSE, Serial.println("/stopAP"));
+
+			if (wifiInstance.currentMode == myWifiClass::wifiMode::modeSTAandAP)
+			{
+				wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeSTA, config.wifi);
+				wifiInstance.server.send(200, "text/html", "<html/>");
+			}
+			else
+			{
+				wifiInstance.server.send(500, "text/html", "<html/>");
+			}
+		});
 
 		wifiInstance.server.on("/json/config", HTTP_GET, []() {
 			// give them back the port / switch map
@@ -180,6 +194,29 @@ void setup() {
 			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 			wifiInstance.server.send(200, "application/json", jsonText);
 		});
+
+		wifiInstance.server.on("/json/wificonfig", HTTP_GET, []() {
+			// give them back the port / switch map
+
+			DEBUG(DEBUG_INFO, Serial.println("json wificonfig called"));
+
+			DynamicJsonBuffer jsonBuffer;
+
+			JsonObject &root = jsonBuffer.createObject();
+
+			root["name"] = wifiInstance.m_hostName.c_str();
+			root["ssid"] = wifiInstance.SSID();
+			root["ip"] = wifiInstance.localIP().toString();
+
+			String jsonText;
+			root.prettyPrintTo(jsonText);
+
+			DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
+
+			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+			wifiInstance.server.send(200, "application/json", jsonText);
+		});
+
 
 		wifiInstance.server.on("/json/wifi", HTTP_GET, []() {
 			// give them back the port / switch map
@@ -258,12 +295,26 @@ void setup() {
 
 			// force attempt
 			// if we fail we fall back to AP
-			if (wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeSTAspeculative, config.wifi) == myWifiClass::wifiMode::modeSTA)
+			if (wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeSTAspeculative, config.wifi) == myWifiClass::wifiMode::modeSTAandAP)
 			{
-				config.wifi.configured = true;
+				// IIF we can ping the host, we accept this
+				DEBUG(DEBUG_VERBOSE, Serial.printf("confirming a ping to %s\n\r", config.postHost.toString().c_str()));
+				if (Ping.ping(config.postHost,3))
+				{
+					DEBUG(DEBUG_IMPORTANT, Serial.println("PING success"));
+					config.wifi.configured = true;
+				}
+				else
+				{
+					DEBUG(DEBUG_IMPORTANT, Serial.println("PING FAILED, reverting"));
+					config.wifi.configured = false;
+					wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeAP, config.wifi);
+				}
+
 			}
 			else
 			{
+				DEBUG(DEBUG_IMPORTANT, Serial.println("Speculative join failed"));
 				config.wifi.configured = false;
 			}
 
@@ -433,7 +484,7 @@ bool appendData(JsonObject &data)
 
 void GoToSleep(unsigned millisseconds)
 {
-	Serial.printf("Going into deep sleep for %d seconds", millisseconds);
+	Serial.printf("Going into deep sleep for %d seconds\n\r", millisseconds);
 
 	// Connect D0 to RST to wake up
 	pinMode(D0, WAKEUP_PULLUP);
@@ -442,6 +493,14 @@ void GoToSleep(unsigned millisseconds)
 
 }
 
+void PrepareDataBlob(JsonObject &root)
+{
+	root["host"] = wifiInstance.m_hostName.c_str();
+	root["intervalS"] = config.samplePeriod;
+	root["current"] = config.iteration;
+	root["version"] = _MYVERSION;
+
+}
 
 
 
@@ -453,7 +512,8 @@ DynamicJsonBuffer jsonHTTPsend;
 // the loop function runs over and over again until power down or reset
 void loop() 
 {
-	if (!config.wifi.configured)
+	// if we haven't completed config, handle the server exclusively
+	if (wifiInstance.currentMode!=myWifiClass::wifiMode::modeSTA)
 	{
 		wifiInstance.server.handleClient();
 		return;
@@ -465,7 +525,7 @@ void loop()
 
 
 	// end server
-	IPAddress pyHost(192, 168, 43, 22);
+	// IPAddress pyHost(192, 168, 43, 22);
 
 
 	float pressure=1, temp=2, humidity=3;
@@ -484,6 +544,8 @@ void loop()
 	DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
 	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size()));
 
+	String returnPayload;
+
 	// if we're not connected, or if the datafile ALREADY exists, append this blob onto the back
 	if ((WiFi.status() != WL_CONNECTED) || SD.exists(_JSON_DATA_FILE))
 	{
@@ -493,7 +555,7 @@ void loop()
 		// then deal with the data file, if we are connected
 		if ((WiFi.status() == WL_CONNECTED))
 		{
-			SendCachedData(pyHost, _PY_PORT);
+			SendCachedData(config.postHost, config.postHostPort, returnPayload);
 		}
 
 	}
@@ -503,9 +565,7 @@ void loop()
 		jsonHTTPsend.clear();
 		JsonObject &root = jsonHTTPsend.createObject();
 
-		root["host"] = wifiInstance.m_hostName.c_str();
-		root["intervalS"] = config.samplePeriod;
-		root["current"] = config.iteration;
+		PrepareDataBlob(root);
 
 		JsonArray &dataArray = root.createNestedArray("data");
 
@@ -520,7 +580,8 @@ void loop()
 		data["humid%"] = d = dataNow["humid%"];
 		data["pressMB"] = e = dataNow["pressMB"];
 
-		int httpCode = SendToHost(pyHost, _PY_PORT, root);
+
+		int httpCode = SendToHost(config.postHost, config.postHostPort, root, returnPayload);
 
 		switch (httpCode)
 		{
@@ -540,6 +601,60 @@ void loop()
 
 	writeConfig();
 
+	// have a look at the payload
+	DynamicJsonBuffer quickBuffer;
+	JsonObject &serverInfo=quickBuffer.parse(returnPayload);
+	if (serverInfo.success())
+	{
+		if (serverInfo.containsKey("reset"))
+		{
+			DEBUG(DEBUG_INFO, Serial.println("response includes reset key"));
+			if (serverInfo["reset"] == true)
+			{
+				DEBUG(DEBUG_IMPORTANT, Serial.println("reset is true"));
+				SD.remove(_JSON_CONFIG_FILE);
+				SD.remove(_JSON_DATA_FILE);
+				// reboot immediately if we're not going to uograde
+				if (!serverInfo.containsKey("upgrade"))
+				{
+					ESP.restart();
+				}
+			}
+		}
+		
+		if (serverInfo.containsKey("upgrade"))
+		{
+			JsonObject& updateDetails = serverInfo["upgrade"];
+			// just blindly go to the url it gave me ... yeah - that feels drama free
+			String host = updateDetails.containsKey("host")?updateDetails["host"]:config.postHost.toString();
+			int port = updateDetails.containsKey("port")?updateDetails["port"]:config.postHostPort;
+			String url = updateDetails["url"];
+			DEBUG(DEBUG_IMPORTANT, Serial.printf("Updating from %s:%d %s\n\r", (const char*)host.c_str(),port, (const char*)url.c_str()));
+			// do it!
+			enum HTTPUpdateResult result=ESPhttpUpdate.update(host,port,url, _MYVERSION);
+
+			switch (result)
+			{
+			case HTTP_UPDATE_FAILED:
+				DEBUG(DEBUG_ERROR, Serial.println("updated FAILED"));
+				break;
+			case HTTP_UPDATE_NO_UPDATES:
+				DEBUG(DEBUG_IMPORTANT, Serial.println("no updates"));
+				break;
+			case HTTP_UPDATE_OK:
+				DEBUG(DEBUG_IMPORTANT, Serial.println("update succeeded"));
+				break;
+			}
+
+		}
+
+	}
+	else
+	{
+		DEBUG(DEBUG_VERBOSE, Serial.println("failed to parse response"));
+	}
+
+
 	unsigned long millisAtEnd = millis();
 
 	unsigned long millisToSleep = (config.samplePeriod * 1000) - (millisAtEnd - millisAtStart);
@@ -548,6 +663,7 @@ void loop()
 
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
+	DEBUG(DEBUG_INFO, Serial.printf("Awake for %lu ms\n\r",millis()-millisAtBoot));
 	GoToSleep(millisToSleep);
 #else
 	delay(millisToSleep);
@@ -555,6 +671,7 @@ void loop()
 
 }
 
+// from a cold boot the sensor needs ~350ms to be ready to take a reading
 // use the A-D voltage
 float readDistanceCMS()
 {
@@ -567,7 +684,7 @@ float readDistanceCMS()
 }
 
 
-int SendToHost(IPAddress &host, unsigned port, JsonObject &blob)
+int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnPayload)
 {
 
 	String *body = new String();
@@ -592,11 +709,10 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob)
 			DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
 			httpCode = http.POST(*body);
 
-#ifdef  _TRY_PING
 			if (httpCode == HTTPC_ERROR_CONNECTION_REFUSED)
 			{
 #ifdef _TRY_PING
-				if (Ping.ping(host))
+				if (Ping.ping(host,1))
 				{
 					DEBUG(DEBUG_IMPORTANT, Serial.println("PING success"));
 				}
@@ -606,9 +722,17 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob)
 				}
 #endif
 			}
-#endif //  _TRY_PING
-
-
+			else
+			{
+				// anything to sump from the server
+				int payloadSize=http.getSize();
+				if (payloadSize)
+				{
+					returnPayload = http.getString();
+					DEBUG(DEBUG_INFO, Serial.printf("payloadsize %d\n\r", payloadSize));
+					DEBUG(DEBUG_INFO, Serial.println(returnPayload));
+				}
+			}
 		}
 
 		DEBUG(DEBUG_VERBOSE, Serial.printf("Post result %d\n\r", httpCode));
@@ -626,7 +750,7 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob)
 
 }
 
-bool SendCachedData(IPAddress &pyHost, unsigned port)
+bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 {
 	if ((WiFi.status() == WL_CONNECTED))
 	{
@@ -641,62 +765,55 @@ bool SendCachedData(IPAddress &pyHost, unsigned port)
 			unsigned long lastIterSeen = 0;
 			bool flagDataFileForDelete = false;
 
+			jsonHTTPsend.clear();
+			JsonObject &root = jsonHTTPsend.createObject();
+
+			PrepareDataBlob(root);
+
+
+			JsonArray &dataArray = root.createNestedArray("data");
+
+			// Google Sheets API has a limit of 500 requests per 100 seconds per project, and 100 requests per 100 seconds per user
+			for (int loopCount = 0; (loopCount < 10) && dataFile.available(); )
 			{
-				jsonHTTPsend.clear();
-				JsonObject &root = jsonHTTPsend.createObject();
+				// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
+				yield();
 
-				root["host"] = wifiInstance.m_hostName.c_str();
-				root["intervalS"] = config.samplePeriod;
-				root["current"] = config.iteration;
-
-				JsonArray &dataArray = root.createNestedArray("data");
-
-				// Google Sheets API has a limit of 500 requests per 100 seconds per project, and 100 requests per 100 seconds per user
+				String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
 
 
+				DynamicJsonBuffer temp;
+				JsonObject &readData = temp.parse(jsonText);
+				DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
 
-				for (int loopCount = 0; (loopCount < 10) && dataFile.available(); )
+				if (readData.success())
 				{
-					// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
-					yield();
 
-					String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
+					lastIterSeen = readData["iter"];
 
-
-					DynamicJsonBuffer temp;
-					JsonObject &readData = temp.parse(jsonText);
-					DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
-
-					if (readData.success())
+					if (lastIterSeen > config.iterationSent)
 					{
+						DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
 
-						lastIterSeen = readData["iter"];
+						JsonObject &data = dataArray.createNestedObject();
 
-						if (lastIterSeen > config.iterationSent)
-						{
-							DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
+						// cloning between objects is 'hard' so go via intermediate var
 
-							JsonObject &data = dataArray.createNestedObject();
+						unsigned long a;
+						float b, c, d, e;
 
-							// cloning between objects is 'hard' so go via intermediate var
+						data["iter"] = a = readData["iter"];
+						data["distCM"] = b = readData["distCM"];
+						data["tempC"] = c = readData["tempC"];
+						data["humid%"] = d = readData["humid%"];
+						data["pressMB"] = e = readData["pressMB"];
 
-							unsigned long a;
-							float b, c, d, e;
-
-							data["iter"] = a = readData["iter"];
-							data["distCM"] = b = readData["distCM"];
-							data["tempC"] = c = readData["tempC"];
-							data["humid%"] = d = readData["humid%"];
-							data["pressMB"] = e = readData["pressMB"];
-
-							loopCount++;
-						}
+						loopCount++;
 					}
-					else
-					{
-						DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse"));
-					}
-
+				}
+				else
+				{
+					DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse"));
 				}
 
 				DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size()));
@@ -704,25 +821,23 @@ bool SendCachedData(IPAddress &pyHost, unsigned port)
 				yield();
 
 
+				int httpCode = SendToHost(pyHost, port, root, returnPayload);
+
+				switch (httpCode)
 				{
-					int httpCode = SendToHost(pyHost, port, root);
-
-					switch (httpCode)
+				case HTTP_CODE_OK:
+				case HTTP_CODE_PROCESSING:
+					config.iterationSent = lastIterSeen;
+					if (!dataFile.available() && config.iterationSent == config.iteration)
 					{
-					case HTTP_CODE_OK:
-					case HTTP_CODE_PROCESSING:
-						config.iterationSent = lastIterSeen;
-						if (!dataFile.available() && config.iterationSent == config.iteration)
-						{
-							flagDataFileForDelete = true;
-						}
-						break;
-					default:
-						DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
-						break;
+						flagDataFileForDelete = true;
 					}
-
+					break;
+				default:
+					DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
+					break;
 				}
+
 			}
 
 			dataFile.close();

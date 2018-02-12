@@ -42,13 +42,13 @@
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
 // default sample period - 15 mins
-#define _SAMPLE_INTERVAL_S	(60*15)
+#define _SAMPLE_INTERVAL_M	(15)
 #define _AP_SLEEP_TIMEOUT			_AP_SLEEP_AFTER_M(2)
 #define _AP_SLEEP_TIMEOUT_STAAP		_AP_SLEEP_AFTER_S(20)
 #define _AP_SLEEP_TIMEOUT_AP		_AP_SLEEP_TIMEOUT
 #define _AP_SLEEP_TIMEOUT_FOREVER	_AP_SLEEP_AFTER_H(1)
 #else
-#define _SAMPLE_INTERVAL_S			(60*5)
+#define _SAMPLE_INTERVAL_M			(5)
 #define _AP_SLEEP_TIMEOUT			_AP_SLEEP_AFTER_M(3)
 #define _AP_SLEEP_TIMEOUT_STAAP		_AP_SLEEP_AFTER_S(20)
 #define _AP_SLEEP_TIMEOUT_AP		_AP_SLEEP_TIMEOUT
@@ -102,7 +102,7 @@ struct {
 {
 	0,					// ver
 	0,0,				// iters
-	_SAMPLE_INTERVAL_S,
+	_SAMPLE_INTERVAL_M,
 	{
 		"","",false,true,IPAddress(),IPAddress(),IPAddress()
 	},
@@ -127,6 +127,8 @@ unsigned long lastSeenTraffic = 0;
 
 // the setup function runs once when you press reset or power the board
 void setup() {
+
+
 
 	Serial.begin(115200);
 	///Serial.setTimeout(2000);
@@ -760,7 +762,7 @@ void loop()
 
 	unsigned long millisToSleep = (config.samplePeriodMins *60 * 1000) - (millisAtEnd - millisAtStart);
 
-	if (additionalSleepOffset > (millisToSleep / 2))
+	if ((unsigned)additionalSleepOffset > (millisToSleep / 2))
 	{
 		millisToSleep += (millisToSleep-additionalSleepOffset);
 		DEBUG(DEBUG_VERBOSE, Serial.printf("Sleeping for %lu + %lu ms\n\r", millisToSleep, (millisToSleep - additionalSleepOffset)));

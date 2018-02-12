@@ -19,10 +19,11 @@
 #define _JSON_DATA_FILE			"DATA.JSN"
 #define _JSON_DATA_SEPARATOR	'\n'
 
+#define _MAX_JSON_DATA_SIZE_GB	1
+#define _MAX_JSON_DATA_SIZE		(_MAX_JSON_DATA_SIZE_GB*(1024*1024*1024))
+
 #define _JSON_BODY_LEN 500
 
-// default sample period - 15 mins
-#define _SAMPLE_INTERVAL_S	(60*15)
 
 #define _SPIFF_RESET_FLAG_FILE	"/reset.txt"
 
@@ -33,6 +34,26 @@
 
 // enable this define for deepsleep (RST and D0 must be connected)
 #define _SLEEP_PERCHANCE_TO_DREAM
+
+#define _AP_SLEEP_AFTER_MS(a)	a
+#define _AP_SLEEP_AFTER_S(a)	_AP_SLEEP_AFTER_MS(1000*a)
+#define _AP_SLEEP_AFTER_M(a)	_AP_SLEEP_AFTER_S(60*a)
+#define _AP_SLEEP_AFTER_H(a)	_AP_SLEEP_AFTER_M(60*a)
+
+#ifdef _SLEEP_PERCHANCE_TO_DREAM
+// default sample period - 15 mins
+#define _SAMPLE_INTERVAL_S	(60*15)
+#define _AP_SLEEP_TIMEOUT			_AP_SLEEP_AFTER_M(2)
+#define _AP_SLEEP_TIMEOUT_STAAP		_AP_SLEEP_AFTER_S(20)
+#define _AP_SLEEP_TIMEOUT_AP		_AP_SLEEP_TIMEOUT
+#define _AP_SLEEP_TIMEOUT_FOREVER	_AP_SLEEP_AFTER_H(1)
+#else
+#define _SAMPLE_INTERVAL_S			(60*5)
+#define _AP_SLEEP_TIMEOUT			_AP_SLEEP_AFTER_M(3)
+#define _AP_SLEEP_TIMEOUT_STAAP		_AP_SLEEP_AFTER_S(20)
+#define _AP_SLEEP_TIMEOUT_AP		_AP_SLEEP_TIMEOUT
+#define _AP_SLEEP_TIMEOUT_FOREVER	-1
+#endif
 
 
 //#define _TRY_PING
@@ -96,7 +117,7 @@ struct {
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
 unsigned long millisAtBoot = millis();
 #endif
-
+unsigned long lastSeenTraffic = 0;
 //#define _CLEAR_DATA
 
 // NOT a mistake - D* is normally slave select for SPI, but i only have one 
@@ -131,9 +152,17 @@ void setup() {
 	if (SPIFFS.exists(_SPIFF_RESET_FLAG_FILE))
 	{
 		DEBUG(DEBUG_IMPORTANT, Serial.println("Resetting"));
-		SD.remove(_JSON_CONFIG_FILE);
 		SD.remove(_JSON_DATA_FILE);
-		SPIFFS.remove(_SPIFF_RESET_FLAG_FILE);
+		if (
+			SD.remove(_JSON_CONFIG_FILE) )
+		{
+			SPIFFS.remove(_SPIFF_RESET_FLAG_FILE);
+			DEBUG(DEBUG_IMPORTANT, Serial.println("Deleting config - reset.txt"));
+		}
+		else
+		{
+			DEBUG(DEBUG_ERROR, Serial.println("FAILED Deleting config- reset.txt"));
+		}
 	}
 
 
@@ -150,6 +179,8 @@ void setup() {
 
 		wifiInstance.server.on("/", HTTP_GET, []() {
 
+			lastSeenTraffic = millis();
+
 			fs::File f;
 			if(wifiInstance.currentMode!=myWifiClass::wifiMode::modeSTAandAP)
 				f = SPIFFS.open("/APmode.htm", "r");
@@ -163,6 +194,7 @@ void setup() {
 		wifiInstance.server.on("/stopAP", []() {
 
 			DEBUG(DEBUG_VERBOSE, Serial.println("/stopAP"));
+			lastSeenTraffic = millis();
 
 			if (wifiInstance.currentMode == myWifiClass::wifiMode::modeSTAandAP)
 			{
@@ -179,6 +211,7 @@ void setup() {
 			// give them back the port / switch map
 
 			DEBUG(DEBUG_INFO, Serial.println("json config called"));
+			lastSeenTraffic = millis();
 
 			DynamicJsonBuffer jsonBuffer;
 
@@ -199,6 +232,7 @@ void setup() {
 			// give them back the port / switch map
 
 			DEBUG(DEBUG_INFO, Serial.println("json wificonfig called"));
+			lastSeenTraffic = millis();
 
 			DynamicJsonBuffer jsonBuffer;
 
@@ -221,6 +255,7 @@ void setup() {
 		wifiInstance.server.on("/json/wifi", HTTP_GET, []() {
 			// give them back the port / switch map
 
+			lastSeenTraffic = millis();
 			DEBUG(DEBUG_INFO, Serial.println("json wifi called"));
 
 			DynamicJsonBuffer jsonBuffer;
@@ -261,6 +296,7 @@ void setup() {
 
 		wifiInstance.server.on("/json/wifi", HTTP_POST, []() {
 
+			lastSeenTraffic = millis();
 			DEBUG(DEBUG_INFO, Serial.println("json wifi posted"));
 			DEBUG(DEBUG_INFO, Serial.println(wifiInstance.server.arg("plain")));
 
@@ -297,6 +333,7 @@ void setup() {
 			// if we fail we fall back to AP
 			if (wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeSTAspeculative, config.wifi) == myWifiClass::wifiMode::modeSTAandAP)
 			{
+#ifdef _PING_CAN_BE_TOLD_WHICH_ITF_TO_USE
 				// IIF we can ping the host, we accept this
 				DEBUG(DEBUG_VERBOSE, Serial.printf("confirming a ping to %s\n\r", config.postHost.toString().c_str()));
 				if (Ping.ping(config.postHost,3))
@@ -310,7 +347,9 @@ void setup() {
 					config.wifi.configured = false;
 					wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeAP, config.wifi);
 				}
-
+#else
+				config.wifi.configured = true;
+#endif
 			}
 			else
 			{
@@ -320,6 +359,10 @@ void setup() {
 
 			// and update json
 			writeConfig();
+
+			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+			wifiInstance.server.send(200, "text/json", "<html/>");
+
 		});
 
 
@@ -359,7 +402,7 @@ void setup() {
 		Serial.println("Found UNKNOWN sensor! Error!");
 	}
 
-
+	lastSeenTraffic = millis();
 
 }
 
@@ -468,16 +511,21 @@ bool appendData(JsonObject &data)
 		DEBUG(DEBUG_ERROR, Serial.println("could not create data"));
 		return false;
 	}
+	if (dataFile.size() < _MAX_JSON_DATA_SIZE)
+	{
+		String dataText;
+		data.printTo(dataText);
+		DEBUG(DEBUG_VERBOSE, Serial.println(dataText));
 
-	String dataText;
-	data.printTo(dataText);
-	DEBUG(DEBUG_VERBOSE, Serial.println(dataText));
+		dataFile.println(dataText.c_str());
+		DEBUG(DEBUG_VERBOSE, Serial.println("written"));
 
-	dataFile.println(dataText.c_str());
-	DEBUG(DEBUG_VERBOSE, Serial.println("written"));
-
-
-	dataFile.close();
+		dataFile.close();
+	}
+	else
+	{
+		DEBUG(DEBUG_VERBOSE, Serial.println("skipping addition, hostory too big"));
+	}
 
 	return true;
 }
@@ -489,6 +537,7 @@ void GoToSleep(unsigned millisseconds)
 	// Connect D0 to RST to wake up
 	pinMode(D0, WAKEUP_PULLUP);
 
+	// sleep is in nano seconds
 	ESP.deepSleep(millisseconds * 1000);
 
 }
@@ -515,6 +564,35 @@ void loop()
 	// if we haven't completed config, handle the server exclusively
 	if (wifiInstance.currentMode!=myWifiClass::wifiMode::modeSTA)
 	{
+		// depends, if we're AP we're fresh out of box, so we should give them time
+		// if we're STAAP then we were just being polite back there, so kill early
+
+		unsigned long sleepTimeOut = _AP_SLEEP_TIMEOUT, sleepTime= _AP_SLEEP_TIMEOUT_FOREVER;
+		String reason("last activity");
+
+		switch (wifiInstance.currentMode)
+		{
+		case myWifiClass::wifiMode::modeAP:
+			sleepTimeOut = _AP_SLEEP_TIMEOUT_AP;
+			sleepTime = _AP_SLEEP_TIMEOUT_FOREVER;
+			reason="AP Mode";
+			break;
+		case myWifiClass::wifiMode::modeSTAandAP:
+			sleepTimeOut = _AP_SLEEP_TIMEOUT_STAAP;
+			sleepTime = _AP_SLEEP_AFTER_S(20);
+			reason="AP_STA Mode";
+			break;
+		}
+
+		if (millis() - lastSeenTraffic > sleepTimeOut)
+		{
+			DEBUG(DEBUG_IMPORTANT, Serial.printf("%s deadline exceeded - battery saving - sleeping forerver, sleeping %lu ms\n\r",reason.c_str(),sleepTime));
+#ifdef _SLEEP_PERCHANCE_TO_DREAM
+			GoToSleep(sleepTime);
+#else
+			delay(sleepTime);
+#endif
+		}
 		wifiInstance.server.handleClient();
 		return;
 	}

@@ -12,7 +12,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.8"
+#define _MYVERSION	"tank_1.9"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -747,6 +747,8 @@ void loop()
 			additionalSleepOffset += ((int)serverInfo["seconds"]) * 1000;
 		}
 
+
+
 	}
 	else
 	{
@@ -757,8 +759,19 @@ void loop()
 	unsigned long millisAtEnd = millis();
 
 	unsigned long millisToSleep = (config.samplePeriodMins *60 * 1000) - (millisAtEnd - millisAtStart);
-	DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu - %lu ms\n\r", millisToSleep, additionalSleepOffset));
-	millisToSleep -= additionalSleepOffset;
+
+	if (additionalSleepOffset > (millisToSleep / 2))
+	{
+		millisToSleep += (millisToSleep-additionalSleepOffset);
+		DEBUG(DEBUG_VERBOSE, Serial.printf("Sleeping for %lu + %lu ms\n\r", millisToSleep, (millisToSleep - additionalSleepOffset)));
+
+	}
+	else
+	{
+		millisToSleep -= additionalSleepOffset;
+		DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu - %lu ms\n\r", millisToSleep, additionalSleepOffset));
+	}
+
 
 
 

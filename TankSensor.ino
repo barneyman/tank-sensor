@@ -12,7 +12,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.4"
+#define _MYVERSION	"tank_1.5"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -33,7 +33,7 @@
 #include <FS.h>
 
 // enable this define for deepsleep (RST and D0 must be connected)
-//#define _SLEEP_PERCHANCE_TO_DREAM
+#define _SLEEP_PERCHANCE_TO_DREAM
 
 #define _AP_SLEEP_AFTER_MS(a)	a
 #define _AP_SLEEP_AFTER_S(a)	_AP_SLEEP_AFTER_MS(1000*a)
@@ -851,7 +851,8 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 			// Google Sheets API has a limit of 500 requests per 100 seconds per project, and 100 requests per 100 seconds per user
 			bool abortMore = false;
-			for (int loopCount = 0;!abortMore && (loopCount < 10) && dataFile.available(); )
+			// server can't handle concurrent requests 
+			for (int loopCount = 0;!abortMore && (loopCount < 1) && dataFile.available(); )
 			{
 				// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
 				yield();
@@ -867,7 +868,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 #define _MAX_ROW_COUNT	5
 
-				for (int rowCount = 0; (rowCount < _MAX_ROW_COUNT) && dataFile.available(); rowCount++)
+				for (int rowCount = 0; (rowCount < _MAX_ROW_COUNT) && dataFile.available(); )
 				{
 
 					String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
@@ -883,7 +884,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 						if (lastIterSeen > config.iterationSent)
 						{
-							DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
+							DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", rowCount+1, jsonText.length(), jsonText.c_str()));
 
 							JsonObject &data = dataArray.createNestedObject();
 
@@ -898,7 +899,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 							data["humid%"] = d = readData["humid%"];
 							data["pressMB"] = e = readData["pressMB"];
 
-							loopCount++;
+							rowCount++;
 						}
 					}
 					else

@@ -12,7 +12,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.5"
+#define _MYVERSION	"tank_1.8"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -90,7 +90,7 @@ BME280I2C bme(mySettings);
 struct {
 	unsigned version;
 	unsigned long iteration, iterationSent;
-	unsigned long samplePeriod;
+	unsigned long samplePeriodMins;
 
 	// wifi deets
 	myWifiClass::wifiDetails wifi;
@@ -281,7 +281,7 @@ void setup() {
 			}
 
 			root["hostport"] = config.postHostPort;
-			root["period"] = config.samplePeriod;
+			root["period"] = config.samplePeriodMins;
 
 
 			String jsonText;
@@ -327,7 +327,7 @@ void setup() {
 
 			config.postHost.fromString((const char*)root["loghost"]);
 			config.postHostPort = root["loghostport"];
-			config.samplePeriod = root["loghostperiod"];
+			config.samplePeriodMins = root["loghostperiod"];
 
 			// force attempt
 			// if we fail we fall back to AP
@@ -433,10 +433,13 @@ bool readConfig()
 
 	config.iteration = root["iteration"];
 	config.version = root["version"];
-	config.samplePeriod = root["samplePeriod"];
+	if(root.containsKey("samplePeriod"))
+		config.samplePeriodMins = ((unsigned long)root["samplePeriod"])/60;
+	else
+		config.samplePeriodMins = root["samplePeriodMin"];
 
 #ifndef _SLEEP_PERCHANCE_TO_DREAM
-	config.samplePeriod = 60 * 2;
+	config.samplePeriodMins = 3;
 #endif
 
 	config.iterationSent=root["lastIterSent"];
@@ -465,7 +468,7 @@ bool writeConfig()
 	JsonObject &root = jsonBuffer.createObject();
 	root["version"] = config.version;
 	root["iteration"] = config.iteration;
-	root["samplePeriod"]=config.samplePeriod;
+	root["samplePeriodMin"]=config.samplePeriodMins;
 	root["lastIterSent"] = config.iterationSent;
 
 	wifiInstance.WriteDetailsToJSON(root, config.wifi);
@@ -534,7 +537,7 @@ bool appendData(JsonObject &data)
 
 void GoToSleep(unsigned millisseconds)
 {
-	Serial.printf("Going into deep sleep for %d seconds\n\r", millisseconds);
+	Serial.printf("Going into deep sleep for %d seconds\n\r", millisseconds/1000);
 
 	// Connect D0 to RST to wake up
 	pinMode(D0, WAKEUP_PULLUP);
@@ -547,7 +550,7 @@ void GoToSleep(unsigned millisseconds)
 void PrepareDataBlob(JsonObject &root)
 {
 	root["host"] = wifiInstance.m_hostName.c_str();
-	root["intervalS"] = config.samplePeriod;
+	root["intervalS"] = config.samplePeriodMins*60;
 	root["current"] = config.iteration;
 	root["version"] = _MYVERSION;
 
@@ -662,7 +665,7 @@ void loop()
 		data["pressMB"] = e = dataNow["pressMB"];
 
 
-		int httpCode = SendToHost(config.postHost, config.postHostPort, root, returnPayload);
+		int httpCode = SendToHost(config.postHost, config.postHostPort, root, returnPayload,0);
 
 		switch (httpCode)
 		{
@@ -681,6 +684,8 @@ void loop()
 
 
 	writeConfig();
+
+	signed long additionalSleepOffset = 0;
 
 	// have a look at the payload
 	DynamicJsonBuffer quickBuffer;
@@ -729,6 +734,19 @@ void loop()
 
 		}
 
+		// try to align with the time
+		if (serverInfo.containsKey("minutes"))
+		{
+			int currentMinutes = serverInfo["minutes"];
+			unsigned minsToSkip = (currentMinutes%config.samplePeriodMins);
+
+			additionalSleepOffset = (minsToSkip *60)*1000;
+		}
+		if (serverInfo.containsKey("seconds"))
+		{
+			additionalSleepOffset += ((int)serverInfo["seconds"]) * 1000;
+		}
+
 	}
 	else
 	{
@@ -738,9 +756,10 @@ void loop()
 
 	unsigned long millisAtEnd = millis();
 
-	unsigned long millisToSleep = (config.samplePeriod * 1000) - (millisAtEnd - millisAtStart);
+	unsigned long millisToSleep = (config.samplePeriodMins *60 * 1000) - (millisAtEnd - millisAtStart);
+	DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu - %lu ms\n\r", millisToSleep, additionalSleepOffset));
+	millisToSleep -= additionalSleepOffset;
 
-	DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu ms\n\r", millisToSleep));
 
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
@@ -765,8 +784,10 @@ float readDistanceCMS()
 }
 
 
-int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnPayload)
+int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnPayload, int retries)
 {
+	if (retries < 1)
+		retries = 1;
 
 	String *body = new String();
 	size_t width = blob.printTo(*body);
@@ -787,7 +808,7 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 
 		http.addHeader("Content-Type", "application/json");
 
-		for (int retryAttempt = 0; (retryAttempt < 3) && httpCode == HTTPC_ERROR_CONNECTION_REFUSED; retryAttempt++)
+		for (int retryAttempt = 0; (retryAttempt < retries) && httpCode == HTTPC_ERROR_CONNECTION_REFUSED; retryAttempt++)
 		{
 			DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
 			httpCode = http.POST(*body);
@@ -913,7 +934,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 				yield();
 				
-				int httpCode = SendToHost(pyHost, port, root, returnPayload);
+				int httpCode = SendToHost(pyHost, port, root, returnPayload,0);
 
 				switch (httpCode)
 				{

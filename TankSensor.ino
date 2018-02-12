@@ -12,7 +12,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.3"
+#define _MYVERSION	"tank_1.4"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -33,7 +33,7 @@
 #include <FS.h>
 
 // enable this define for deepsleep (RST and D0 must be connected)
-#define _SLEEP_PERCHANCE_TO_DREAM
+//#define _SLEEP_PERCHANCE_TO_DREAM
 
 #define _AP_SLEEP_AFTER_MS(a)	a
 #define _AP_SLEEP_AFTER_S(a)	_AP_SLEEP_AFTER_MS(1000*a)
@@ -383,7 +383,7 @@ void setup() {
 	}
 	else
 	{ 
-		wifiInstance.ConnectWifi(myWifiClass::modeSTA, config.wifi);
+		wifiInstance.ConnectWifi(myWifiClass::modeSTA, config.wifi, false);
 	}
 
 	Wire.begin(D2, D1);
@@ -434,6 +434,11 @@ bool readConfig()
 	config.iteration = root["iteration"];
 	config.version = root["version"];
 	config.samplePeriod = root["samplePeriod"];
+
+#ifndef _SLEEP_PERCHANCE_TO_DREAM
+	config.samplePeriod = 60 * 2;
+#endif
+
 	config.iterationSent=root["lastIterSent"];
 
 	wifiInstance.ReadDetailsFromJSON(root, config.wifi);
@@ -500,8 +505,6 @@ bool writeConfig()
 
 bool appendData(JsonObject &data)
 {
-
-
 	DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
 
 	File dataFile = SD.open(_JSON_DATA_FILE, FILE_WRITE | O_APPEND);
@@ -518,7 +521,6 @@ bool appendData(JsonObject &data)
 		DEBUG(DEBUG_VERBOSE, Serial.println(dataText));
 
 		dataFile.println(dataText.c_str());
-		DEBUG(DEBUG_VERBOSE, Serial.println("written"));
 
 		dataFile.close();
 	}
@@ -619,7 +621,7 @@ void loop()
 	dataNow["humid%"] = humidity;
 	dataNow["pressMB"] = pressure;
 
-	DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
+	DEBUG(DEBUG_VERBOSE, Serial.println("new data"));
 	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size()));
 
 	String returnPayload;
@@ -627,6 +629,7 @@ void loop()
 	// if we're not connected, or if the datafile ALREADY exists, append this blob onto the back
 	if ((WiFi.status() != WL_CONNECTED) || SD.exists(_JSON_DATA_FILE))
 	{
+		DEBUG(DEBUG_VERBOSE, Serial.println(SD.exists(_JSON_DATA_FILE)?"existing stale data":"wifi problem"));
 		// append
 		appendData(dataNow);
 
@@ -768,8 +771,10 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 	String *body = new String();
 	size_t width = blob.printTo(*body);
 
-	DEBUG(DEBUG_VERBOSE, Serial.printf("JSON length = %d\n\r", width));
+	DEBUG(DEBUG_VERBOSE, Serial.println("===================="));
+	DEBUG(DEBUG_VERBOSE, Serial.printf("Body - JSON length = %d\n\r", width));
 	DEBUG(DEBUG_VERBOSE, Serial.println(*body));
+	DEBUG(DEBUG_VERBOSE, Serial.println("===================="));
 	int httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
 	HTTPClient http;
 	
@@ -799,6 +804,8 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 					DEBUG(DEBUG_IMPORTANT, Serial.println("PING FAILED"));
 				}
 #endif
+				DEBUG(DEBUG_VERBOSE, Serial.println("Connection refused"));
+
 			}
 			else
 			{
@@ -807,7 +814,7 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 				if (payloadSize)
 				{
 					returnPayload = http.getString();
-					DEBUG(DEBUG_INFO, Serial.printf("payloadsize %d\n\r", payloadSize));
+					DEBUG(DEBUG_INFO, Serial.printf("response payloadsize %d\n\r", payloadSize));
 					DEBUG(DEBUG_INFO, Serial.println(returnPayload));
 				}
 			}
@@ -833,8 +840,6 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 	if ((WiFi.status() == WL_CONNECTED))
 	{
 
-
-
 		File dataFile = SD.open(_JSON_DATA_FILE, FILE_READ);
 
 
@@ -843,62 +848,70 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 			unsigned long lastIterSeen = 0;
 			bool flagDataFileForDelete = false;
 
-			jsonHTTPsend.clear();
-			JsonObject &root = jsonHTTPsend.createObject();
-
-			PrepareDataBlob(root);
-
-
-			JsonArray &dataArray = root.createNestedArray("data");
 
 			// Google Sheets API has a limit of 500 requests per 100 seconds per project, and 100 requests per 100 seconds per user
-			for (int loopCount = 0; (loopCount < 10) && dataFile.available(); )
+			bool abortMore = false;
+			for (int loopCount = 0;!abortMore && (loopCount < 10) && dataFile.available(); )
 			{
 				// this takes a while - this isn't NetWare, OS calls don't yied, so do it explicitly
 				yield();
 
-				String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
+				jsonHTTPsend.clear();
+				JsonObject &root = jsonHTTPsend.createObject();
 
+				PrepareDataBlob(root);
 
-				DynamicJsonBuffer temp;
-				JsonObject &readData = temp.parse(jsonText);
-				DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
+				DEBUG(DEBUG_VERBOSE, Serial.println("aggregating stale data"));
 
-				if (readData.success())
+				JsonArray &dataArray = root.createNestedArray("data");
+
+#define _MAX_ROW_COUNT	5
+
+				for (int rowCount = 0; (rowCount < _MAX_ROW_COUNT) && dataFile.available(); rowCount++)
 				{
 
-					lastIterSeen = readData["iter"];
+					String jsonText = dataFile.readStringUntil(_JSON_DATA_SEPARATOR);
 
-					if (lastIterSeen > config.iterationSent)
+					DynamicJsonBuffer temp;
+					JsonObject &readData = temp.parse(jsonText);
+					DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
+
+					if (readData.success())
 					{
-						DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
 
-						JsonObject &data = dataArray.createNestedObject();
+						lastIterSeen = readData["iter"];
 
-						// cloning between objects is 'hard' so go via intermediate var
+						if (lastIterSeen > config.iterationSent)
+						{
+							DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", loopCount + 1, jsonText.length(), jsonText.c_str()));
 
-						unsigned long a;
-						float b, c, d, e;
+							JsonObject &data = dataArray.createNestedObject();
 
-						data["iter"] = a = readData["iter"];
-						data["distCM"] = b = readData["distCM"];
-						data["tempC"] = c = readData["tempC"];
-						data["humid%"] = d = readData["humid%"];
-						data["pressMB"] = e = readData["pressMB"];
+							// cloning between objects is 'hard' so go via intermediate var
 
-						loopCount++;
+							unsigned long a;
+							float b, c, d, e;
+
+							data["iter"] = a = readData["iter"];
+							data["distCM"] = b = readData["distCM"];
+							data["tempC"] = c = readData["tempC"];
+							data["humid%"] = d = readData["humid%"];
+							data["pressMB"] = e = readData["pressMB"];
+
+							loopCount++;
+						}
 					}
-				}
-				else
-				{
-					DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse"));
-				}
+					else
+					{
+						DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse stale data row"));
+					}
 
-				DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size()));
+					DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size()));
+
+				}
 
 				yield();
-
-
+				
 				int httpCode = SendToHost(pyHost, port, root, returnPayload);
 
 				switch (httpCode)
@@ -912,7 +925,8 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 					}
 					break;
 				default:
-					DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
+					DEBUG(DEBUG_VERBOSE, Serial.println("failed, bailing"));
+					abortMore = true;
 					break;
 				}
 

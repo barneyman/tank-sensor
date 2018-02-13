@@ -1,6 +1,7 @@
 from flask import Flask, request, send_from_directory
 from concurrent.futures import ThreadPoolExecutor
 import json
+import signal
 
 from bjfGoogle import bjfGoogle, bjfFusionService, bjfSheetsService
 #import bjfGoogle
@@ -40,7 +41,7 @@ def data():
 		try:
 			# create a json blob to send back
 			timenow=datetime.now()
-			returnBlob = {'localTime': timenow.strftime("%H:%M:%S"), 'reset': False}
+			returnBlob = {'localTime': timenow.strftime("%H:%M:%S"), 'minutes':timenow.strftime("%M"),'seconds':timenow.strftime("%S"), 'reset': False}
 			# get the version running
 			clientVer=request.json['version']
 
@@ -73,6 +74,51 @@ def data():
 
 failedRowValues=[]
 
+def sigterm_handler(_signo, _stack_frame):
+    # Raises SystemExit(0):
+	
+	writeStaleData()
+	sys.exit(0)
+
+
+def writeStaleData():	
+	if len(failedRowValues)>0:
+		print("scribbling the stales to file")
+		json.dump(failedRowValues, open(defaultDirectory+"config/staleData.json",'w'))
+
+def PublishJSON(maxRows):	
+	# the [:] means take a copy of thing to  iterate with - i like python
+	archiveRowCount=0
+	print("archived items ",len(failedRowValues));
+	# the [:] means take a copy of thing to  iterate with - i like python
+	
+	for row in failedRowValues[:]:
+		# don't try tpoo many times and swamp poor google
+		archiveRowCount=archiveRowCount+1
+		bailNow=False
+		if archiveRowCount>maxRows:
+			break
+		try:
+			print("retrying row ",row)
+			#raise ValueError('faking a fusion error - collect a few of these.')
+			theTable=getOrCreateTable(row['table'])		
+			fusion.InsertRowData(theTable,row['data'])
+			# workled, remove the the ORIGINAL list
+			failedRowValues.remove(row)
+		except Exception as e:
+			print("fusion retry failed ",e)
+			# we need to bail on fail or we risk breaking sequence
+			bailNow=true
+		try:
+			if bailNow==False:
+				sheetsService.AppendSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', row, 'HISTORY_DATA')
+		except Exception as e:
+			print("sheets retry failed - don't care",e)
+			
+		if bailNow == True:
+			break
+	
+	
 def ProcessJSON(jsonData):
 	#print (jsonData)
 	#print("=======")
@@ -81,25 +127,7 @@ def ProcessJSON(jsonData):
 	try:
 
 		# the [:] means take a copy of thing to  iterate with - i like python
-		archiveRowCount=0
-		print("archived items ",len(failedRowValues));
-		for row in failedRowValues[:]:
-			# don't try tpoo many times and swamp poor google
-			archiveRowCount=archiveRowCount+1
-			if archiveRowCount>5:
-				break
-			try:
-				print("retrying row ",row)
-				fusion.InsertRowData(tpTable,row)
-				# workled, remove the the ORIGINAL list
-				failedRowValues.remove(row)
-			except Exception as e:
-				print("fusion retry failed ",e)
-			try:
-				sheetsService.AppendSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', row, 'HISTORY_DATA')
-			except Exception as e:
-				print("sheets retry failed - don't care",e)
-
+		PublishJSON(2)
 
 		rowValues=[]
 
@@ -131,18 +159,21 @@ def ProcessJSON(jsonData):
 				failedRowValues.append(rowValues)
 				print ("force queued row")
 			else:
-				# fusion is the important one
 				try:
-					fusion.InsertRowData(tpTable,rowValues)
+					# fusion is the important one
+					tableName=jsonData["host"]+"_tempPressure";
+					theTable=getOrCreateTable(tableName)		
+					#raise ValueError('faking a fusion error - collect a few of these.')
+					fusion.InsertRowData(theTable,rowValues)
+					try:
+						sheetsService.AppendSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', rowValues, 'HISTORY_DATA')
+					except Exception as e:
+						print("sheets exception ",e)
 				except Exception as e:
 					print("fusion exception ",e)
 					if len(failedRowValues) < 1000:
-						failedRowValues.append(rowValues)
+						failedRowValues.append({ "table":tableName,"data":rowValues})
 						print ("queued row ")
-				try:
-					sheetsService.AppendSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', rowValues, 'HISTORY_DATA')
-				except Exception as e:
-					print("sheets exception ",e)
 
 
 		#  deep copy
@@ -153,6 +184,16 @@ def ProcessJSON(jsonData):
 		print( "processed")
 	except Exception as e:
 		print ("Async Exception occurred ",e)
+		
+
+		
+def getOrCreateTable(tableName):
+	theTable=fusion.GetTableByName(tableName)
+	if theTable==None:
+		print("Creating fusion Table ...", tableName)
+		tableDef={"name":tableName,"isExportable":False, "columns":[{"name":"whenUTC","type":"DATETIME"},{"name":"local","type":"DATETIME"},{"name":"iter","type":"NUMBER"},{"name":"tempC","type":"NUMBER"},{"name":"pressureMB","type":"NUMBER"},{"name":"humidity%","type":"NUMBER"},{"name":"distanceCM","type":"NUMBER"}]  }
+		theTable=fusion.CreateTable(tableDef)
+	return theTable
 
 
 if __name__ == "__main__":
@@ -161,21 +202,25 @@ if __name__ == "__main__":
 	# create a fusion table
 	fusion=bjfFusionService(thisG)
 	sheetsService=bjfSheetsService(thisG)
-	# seeif our table is there
-	tableName="tempPressure"
-	tpTable=fusion.GetTableByName(tableName)
+	# see if our table is there
 
-	if tpTable==None:
-		print("Creating fusion Table ...")
-		tableDef={"name":tableName,"isExportable":False, "columns":[{"name":"whenUTC","type":"DATETIME"},{"name":"local","type":"DATETIME"},{"name":"iter","type":"NUMBER"},{"name":"tempC","type":"NUMBER"},{"name":"pressureMB","type":"NUMBER"},{"name":"humidity%","type":"NUMBER"},{"name":"distanceCM","type":"NUMBER"}]  }
-		tpTable=fusion.CreateTable(tableDef)
-
-	if tpTable!=None:
+	#tableName="tempPressure"
+	#tpTable=fusion.GetTableByName(tableName)
+	
+	#signal.signal(signal.SIGTERM, sigterm_handler)
+	#signal.signal(signal.SIGINT, sigterm_handler)
+	
+	print ("reading stale data "),
+	failedRowValues = json.load(open(defaultDirectory+"config/staleData.json"))
+	print(len(failedRowValues))
+	PublishJSON(20)
+	
+	if True: #tpTable!=None:
 		print("running")
 		executor = ThreadPoolExecutor(2)
 		app.run(host="0.0.0.0", port=FlaskPort)
 
-
+		writeStaleData()
 
 
 

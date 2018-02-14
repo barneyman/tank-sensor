@@ -13,7 +13,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.9"
+#define _MYVERSION	"tank_1.10"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -622,7 +622,7 @@ void loop()
 	JsonObject &dataNow = jsonBuffer.createObject();
 
 	dataNow["iter"] = ++config.iteration;
-	dataNow["distCM"] = readDistanceCMS();
+	dataNow["distCM"] = readDistanceCMS(3);
 	dataNow["tempC"] = temp;
 	dataNow["humid%"] = humidity;
 	dataNow["pressMB"] = pressure;
@@ -789,14 +789,24 @@ void loop()
 
 // from a cold boot the sensor needs ~350ms to be ready to take a reading
 // use the A-D voltage
-float readDistanceCMS()
+float readDistanceCMS(int samples)
 {
+	if (samples < 1)
+		samples = 1;
+	float analog = 0;
+	for (int each = 0; each < samples; each++)
+	{
+		analog += analogRead(A0);
+		// 49msec for a new read
+		delay(55);
+	}
+	analog /= (float)samples;
 	// long way round
 	//float ana = analogRead(A0);
 	//float anaV = 3.3 * (ana / 1024);
 	//float scale = 3.3 / 512.0;
 	//float theRange = (anaV/scale)*2.54;
-	return (analogRead(A0) / 2)*2.54;
+	return (analog / 2.0)*2.54;
 }
 
 

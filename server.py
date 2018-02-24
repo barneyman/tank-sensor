@@ -15,7 +15,10 @@ app=Flask(__name__)
 def main():
     return "Welcome!"
 
-defaultDirectory="/home/pi/tank/"
+#pi
+#defaultDirectory="/home/pi/tank/"
+# windows
+defaultDirectory="c:\\scribble\\"
 
 #upgradesDict={ 'tank_1.0':'TankSensor_1_1.bin','tank_1.1':'TankSensor_1_2.bin','tank_1.2':'TankSensor_1_3.bin' }
 FlaskPort=5000
@@ -52,6 +55,7 @@ def data():
 			except Exception as e:
 				print ("parsing problem ",e)
 
+			# expects { "latest":"tank_1.11", "binary":"TankSensor_1.11.bin"}
 			if not "latest" in upgradesDict or not "binary" in upgradesDict:
 				latestVer=clientVer
 			else:
@@ -120,9 +124,10 @@ def PublishJSON(maxRows):
 	
 	
 def ProcessJSON(jsonData):
-	#print (jsonData)
-	#print("=======")
-	#print (jsonData["data"])
+	print (jsonData)
+	print("=======")
+	print (jsonData["data"])
+	print("=======")
 	# work out how many times we have to do this
 	try:
 
@@ -143,7 +148,7 @@ def ProcessJSON(jsonData):
 			utcForIteration=utcNow-(timedelta(seconds=intervalSeconds*(currentIter-reading["iter"])))
 			localForIteration=localNow-(timedelta(seconds=intervalSeconds*(currentIter-reading["iter"])))
 
-			lastRowValues=[utcForIteration.strftime("%Y-%m-%d %H:%M:%S"),localForIteration.strftime("%Y-%m-%d %H:%M:%S"), reading["iter"], reading["tempC"],reading["pressMB"],reading["humid%"], reading["distCM"] ]
+			lastRowValues=[utcForIteration.strftime("%Y-%m-%d %H:%M:%S"),localForIteration.strftime("%Y-%m-%d %H:%M:%S"), reading["iter"], reading["tempC"],reading["pressMB"],reading["humid%"], reading["distCM"], reading["lux"], reading["lipo"] ]
 
 			# DEBUG - seive to minutes only
 			#if reading["iter"] % 6 == 0:
@@ -191,7 +196,7 @@ def getOrCreateTable(tableName):
 	theTable=fusion.GetTableByName(tableName)
 	if theTable==None:
 		print("Creating fusion Table ...", tableName)
-		tableDef={"name":tableName,"isExportable":False, "columns":[{"name":"whenUTC","type":"DATETIME"},{"name":"local","type":"DATETIME"},{"name":"iter","type":"NUMBER"},{"name":"tempC","type":"NUMBER"},{"name":"pressureMB","type":"NUMBER"},{"name":"humidity%","type":"NUMBER"},{"name":"distanceCM","type":"NUMBER"}]  }
+		tableDef={"name":tableName,"isExportable":False, "columns":[{"name":"whenUTC","type":"DATETIME"},{"name":"local","type":"DATETIME"},{"name":"iter","type":"NUMBER"},{"name":"tempC","type":"NUMBER"},{"name":"pressureMB","type":"NUMBER"},{"name":"humidity%","type":"NUMBER"},{"name":"distanceCM","type":"NUMBER"},{"name":"lux","type":"NUMBER"},{"name":"lipoV","type":"NUMBER"}]  }
 		theTable=fusion.CreateTable(tableDef)
 	return theTable
 
@@ -211,9 +216,12 @@ if __name__ == "__main__":
 	#signal.signal(signal.SIGINT, sigterm_handler)
 	
 	print ("reading stale data "),
-	failedRowValues = json.load(open(defaultDirectory+"config/staleData.json"))
-	print(len(failedRowValues))
-	PublishJSON(20)
+	try:
+		failedRowValues = json.load(open(defaultDirectory+"config/staleData.json"))
+		print(len(failedRowValues))
+		PublishJSON(20)
+	except:
+		failedRowValues=[]
 	
 	if True: #tpTable!=None:
 		print("running")

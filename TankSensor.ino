@@ -13,7 +13,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.10"
+#define _MYVERSION	"tank_1.14"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -56,6 +56,7 @@
 #define _AP_SLEEP_TIMEOUT_FOREVER	-1
 #endif
 
+//#define _SCAN_I2C
 
 //#define _TRY_PING
 #include <ESP8266Ping.h>
@@ -70,6 +71,8 @@ myWifiClass wifiInstance("wemos_");
 
 
 #include <BME280I2C.h>
+
+#include <MAX44009.h>
 
 BME280I2C::Settings mySettings = {
 
@@ -86,7 +89,7 @@ BME280I2C::Settings mySettings = {
 };
 
 BME280I2C bme(mySettings);
-
+Max44009 lux(0x4a);
 
 struct {
 	unsigned version;
@@ -121,10 +124,20 @@ unsigned long millisAtBoot = millis();
 unsigned long lastSeenTraffic = 0;
 //#define _CLEAR_DATA
 
-// NOT a mistake - D* is normally slave select for SPI, but i only have one 
-// SPI device, so i'm slaving that to ground and reusing the pin 
-// because i cant use D3/D4 (gpio 0 and 2)
-#define TRAN_PIN	D8
+#define _MOVE_SDASCL
+
+#ifdef _MOVE_SDASCL
+// controls the gated ground
+#define TRAN_PIN	D1
+// pin for pw reading of ultrasonic sensor
+#define ULTRA_PULSE	D2
+#else
+// controls the gated ground
+#define TRAN_PIN	D3
+// pin for pw reading of ultrasonic sensor
+#define ULTRA_PULSE	D4
+#endif
+// D4 is built in LED
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -140,8 +153,8 @@ void setup() {
 	digitalWrite(TRAN_PIN, HIGH);
 
 
-	// see comment for TRAN_PIN
-	if (!SD.begin(D4))
+	// 
+	if (!SD.begin(D8))
 	{
 		DEBUG(DEBUG_ERROR,Serial.println("SD card failed"));
 	}
@@ -389,8 +402,22 @@ void setup() {
 		wifiInstance.ConnectWifi(myWifiClass::modeSTA, config.wifi, false);
 	}
 
+#ifdef _MOVE_SDASCL
+	Wire.begin(D4, D3);
+#else
 	Wire.begin(D2, D1);
+#endif
+
+#ifdef	_SCAN_I2C
+
+	ScanI2C();
+
+#endif
+
+
+
 	bme.begin();
+	//lux.setAutomaticMode();
 
 
 	switch (bme.chipModel())
@@ -442,7 +469,7 @@ bool readConfig()
 		config.samplePeriodMins = root["samplePeriodMin"];
 
 #ifndef _SLEEP_PERCHANCE_TO_DREAM
-	config.samplePeriodMins = 3;
+	config.samplePeriodMins = 1;
 #endif
 
 	config.iterationSent=root["lastIterSent"];
@@ -540,7 +567,8 @@ bool appendData(JsonObject &data)
 
 void GoToSleep(unsigned millisseconds)
 {
-	Serial.printf("Going into deep sleep for %d seconds\n\r", millisseconds/1000);
+	unsigned tempSeconds = millisseconds / 1000;
+	DEBUG(DEBUG_IMPORTANT,Serial.printf("Going into deep sleep for %d mins %d secs\n\r", tempSeconds/60, tempSeconds%60));
 
 	// Connect D0 to RST to wake up
 	pinMode(D0, WAKEUP_PULLUP);
@@ -559,6 +587,14 @@ void PrepareDataBlob(JsonObject &root)
 
 }
 
+// https://arduinodiy.wordpress.com/2016/12/25/monitoring-lipo-battery-voltage-with-wemos-d1-minibattery-shield-and-thingspeak/
+float readLIPOvoltage()
+{
+	int ana = analogRead(A0);
+	float voltage = ((float)ana / 1023.0)*4.2;
+
+	return voltage;
+}
 
 
 DynamicJsonBuffer jsonHTTPsend;
@@ -570,7 +606,7 @@ DynamicJsonBuffer jsonHTTPsend;
 void loop() 
 {
 	// if we haven't completed config, handle the server exclusively
-	if (wifiInstance.currentMode!=myWifiClass::wifiMode::modeSTA)
+	if (wifiInstance.currentMode!=myWifiClass::wifiMode::modeSTA && wifiInstance.currentMode != myWifiClass::wifiMode::modeSTA_unjoined)
 	{
 		// depends, if we're AP we're fresh out of box, so we should give them time
 		// if we're STAAP then we were just being polite back there, so kill early
@@ -622,10 +658,12 @@ void loop()
 	JsonObject &dataNow = jsonBuffer.createObject();
 
 	dataNow["iter"] = ++config.iteration;
-	dataNow["distCM"] = readDistanceCMS(3);
+	dataNow["distCM"] = readDistanceCMS_Pulse(3);
 	dataNow["tempC"] = temp;
 	dataNow["humid%"] = humidity;
 	dataNow["pressMB"] = pressure;
+	dataNow["lux"] = readLux();
+	dataNow["lipo"] = readLIPOvoltage();
 
 	DEBUG(DEBUG_VERBOSE, Serial.println("new data"));
 	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size()));
@@ -657,7 +695,7 @@ void loop()
 		JsonArray &dataArray = root.createNestedArray("data");
 
 		unsigned long a;
-		float b, c, d, e;
+		float b, c, d, e, f, g;
 
 		JsonObject &data = dataArray.createNestedObject();
 
@@ -666,6 +704,8 @@ void loop()
 		data["tempC"] = c = dataNow["tempC"];
 		data["humid%"] = d = dataNow["humid%"];
 		data["pressMB"] = e = dataNow["pressMB"];
+		data["lux"] = f = dataNow["lux"];
+		data["lipo"] = g = dataNow["lipo"];
 
 
 		int httpCode = SendToHost(config.postHost, config.postHostPort, root, returnPayload,0);
@@ -778,7 +818,11 @@ void loop()
 
 
 
+
+
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
+	digitalWrite(TRAN_PIN, LOW);
+	// turn power off
 	DEBUG(DEBUG_INFO, Serial.printf("Awake for %lu ms\n\r",millis()-millisAtBoot));
 	GoToSleep(millisToSleep);
 #else
@@ -787,9 +831,31 @@ void loop()
 
 }
 
+float readLux()
+{
+	return lux.getLux();
+}
+
 // from a cold boot the sensor needs ~350ms to be ready to take a reading
 // use the A-D voltage
-float readDistanceCMS(int samples)
+float readDistanceCMS_Pulse(int )
+{
+	pinMode(ULTRA_PULSE, INPUT);
+	unsigned timeItTook = pulseIn(ULTRA_PULSE,HIGH);
+	// 147uS/inch
+
+	float inches = timeItTook / 147;
+
+	//pinMode(ULTRA_PULSE, OUTPUT);
+	//digitalWrite(ULTRA_PULSE, LOW);
+
+	return inches*2.54;
+
+
+}
+
+
+float readDistanceCMS_Analogue(int samples)
 {
 	if (samples < 1)
 		samples = 1;
@@ -938,13 +1004,15 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 							// cloning between objects is 'hard' so go via intermediate var
 
 							unsigned long a;
-							float b, c, d, e;
+							float b, c, d, e, f, g;
 
 							data["iter"] = a = readData["iter"];
 							data["distCM"] = b = readData["distCM"];
 							data["tempC"] = c = readData["tempC"];
 							data["humid%"] = d = readData["humid%"];
 							data["pressMB"] = e = readData["pressMB"];
+							data["lux"] = f = readData["lux"];
+							data["lipo"] = g = readData["lipo"];
 
 							rowCount++;
 						}
@@ -1006,3 +1074,53 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 	return true;
 
 }
+
+
+#ifdef _SCAN_I2C
+
+void ScanI2C()
+{
+	{
+		byte error, address;
+		int nDevices;
+
+		Serial.println("Scanning...");
+
+		nDevices = 0;
+		for (address = 1; address < 127; address++)
+		{
+			// The i2c_scanner uses the return value of
+			// the Write.endTransmisstion to see if
+			// a device did acknowledge to the address.
+			Wire.beginTransmission(address);
+			error = Wire.endTransmission();
+
+			if (error == 0)
+			{
+				Serial.print("I2C device found at address 0x");
+				if (address<16)
+					Serial.print("0");
+				Serial.print(address, HEX);
+				Serial.println("  !");
+
+				nDevices++;
+			}
+			else if (error == 4)
+			{
+				Serial.print("Unknown error at address 0x");
+				if (address<16)
+					Serial.print("0");
+				Serial.println(address, HEX);
+			}
+		}
+		if (nDevices == 0)
+			Serial.println("No I2C devices found\n");
+		else
+			Serial.println("done\n");
+
+		delay(5000);           // wait 5 seconds for next scan
+}
+}
+
+
+#endif

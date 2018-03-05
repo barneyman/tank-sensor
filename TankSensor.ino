@@ -13,7 +13,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.14"
+#define _MYVERSION	"tank_1.16"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -234,7 +234,8 @@ void setup() {
 			JsonObject &root = jsonBuffer.createObject();
 
 			root["name"] = wifiInstance.m_hostName.c_str();
-
+			root["version"] = _MYVERSION;
+			
 			String jsonText;
 			root.prettyPrintTo(jsonText);
 
@@ -588,10 +589,13 @@ void PrepareDataBlob(JsonObject &root)
 }
 
 // https://arduinodiy.wordpress.com/2016/12/25/monitoring-lipo-battery-voltage-with-wemos-d1-minibattery-shield-and-thingspeak/
+// i added 110k to protect against lipo charging blowing the analog
+// so, working backwards ... max voltage is 4.3v
+// 
 float readLIPOvoltage()
 {
 	int ana = analogRead(A0);
-	float voltage = ((float)ana / 1023.0)*4.2;
+	float voltage = ((float)ana / 1023.0)*4.3;
 
 	return voltage;
 }
@@ -658,7 +662,7 @@ void loop()
 	JsonObject &dataNow = jsonBuffer.createObject();
 
 	dataNow["iter"] = ++config.iteration;
-	dataNow["distCM"] = readDistanceCMS_Pulse(3);
+	dataNow["distCM"] = readDistanceCMS_Pulse(5);
 	dataNow["tempC"] = temp;
 	dataNow["humid%"] = humidity;
 	dataNow["pressMB"] = pressure;
@@ -836,20 +840,32 @@ float readLux()
 	return lux.getLux();
 }
 
+#include <vector>
+#include <algorithm>
+
 // from a cold boot the sensor needs ~350ms to be ready to take a reading
 // use the A-D voltage
-float readDistanceCMS_Pulse(int )
+float readDistanceCMS_Pulse(int sampleCount)
 {
-	pinMode(ULTRA_PULSE, INPUT);
-	unsigned timeItTook = pulseIn(ULTRA_PULSE,HIGH);
-	// 147uS/inch
+	std::vector<float> samples;
 
-	float inches = timeItTook / 147;
+	for (; sampleCount; sampleCount--)
+	{
+		delay(100);
+		pinMode(ULTRA_PULSE, INPUT);
+		unsigned timeItTook = pulseIn(ULTRA_PULSE, HIGH);
+		// 147uS/inch
 
-	//pinMode(ULTRA_PULSE, OUTPUT);
-	//digitalWrite(ULTRA_PULSE, LOW);
+		float inches = timeItTook / 147;
 
-	return inches*2.54;
+		//pinMode(ULTRA_PULSE, OUTPUT);
+		//digitalWrite(ULTRA_PULSE, LOW);
+		samples.push_back(inches*2.54);
+	}
+
+	std::sort(samples.begin(),samples.end());
+
+	return samples.back();
 
 
 }

@@ -16,23 +16,34 @@ def main():
     return "Welcome!"
 
 #pi
-#defaultDirectory="/home/pi/tank/"
+defaultDirectory="/home/pi/tank/"
 # windows
-defaultDirectory="c:\\scribble\\"
+#defaultDirectory="c:\\scribble\\"
 
 #upgradesDict={ 'tank_1.0':'TankSensor_1_1.bin','tank_1.1':'TankSensor_1_2.bin','tank_1.2':'TankSensor_1_3.bin' }
 FlaskPort=5000
+
 
 @app.route('/upgrades/<path:filename>')
 def send_js(filename):
 	print("sending "+filename)
 	return send_from_directory(defaultDirectory+'upgrades', filename)
 
+
+
 @app.route("/data", methods=['GET', 'POST'])
 def data():
 	if request.method == 'GET':
+
+		lastSeenValues=[]
 		print( "data GET" )
-		return "data"
+		print (lastSeenValues)
+		try:
+			lastSeenValues=json.load( open(defaultDirectory+"config/lastSeenData.json"))
+		except:
+			print ("no last data")
+
+		return json.dumps(lastSeenValues, separators=(',', ':'));
 	else:
 		if not request.json:
 			print ("error")
@@ -124,14 +135,14 @@ def PublishJSON(maxRows):
 	
 	
 def ProcessJSON(jsonData):
-	print (jsonData)
-	print("=======")
-	print (jsonData["data"])
-	print("=======")
+	#print (jsonData)
+	#print("=======")
+	#print (jsonData["data"])
+	#print("=======")
 	# work out how many times we have to do this
 	try:
 
-		# the [:] means take a copy of thing to  iterate with - i like python
+		# push any stale values
 		PublishJSON(2)
 
 		rowValues=[]
@@ -181,6 +192,8 @@ def ProcessJSON(jsonData):
 						print ("queued row ")
 
 
+		# deepcopy
+		json.dump(lastRowValues, open(defaultDirectory+"config/lastSeenData.json",'w'))
 		#  deep copy
 		latestRowData = [i for i in lastRowValues]
 		rowValues=[latestRowData]

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE eagle SYSTEM "eagle.dtd">
-<eagle version="8.7.1">
+<eagle version="9.0.1">
 <drawing>
 <settings>
 <setting alwaysvectorfont="no"/>
@@ -290,32 +290,12 @@ In this library the device names are the same as the pin names of the symbols, t
 <text x="-1.905" y="3.175" size="1.778" layer="96">&gt;VALUE</text>
 <pin name="+5V" x="0" y="-2.54" visible="off" length="short" direction="sup" rot="R90"/>
 </symbol>
-<symbol name="+12V" urn="urn:adsk.eagle:symbol:26985/1" library_version="2">
-<wire x1="0" y1="1.905" x2="0" y2="0.635" width="0.1524" layer="94"/>
-<wire x1="-0.635" y1="1.27" x2="0.635" y2="1.27" width="0.1524" layer="94"/>
-<circle x="0" y="1.27" radius="1.27" width="0.254" layer="94"/>
-<text x="-2.54" y="3.175" size="1.778" layer="96">&gt;VALUE</text>
-<pin name="+12V" x="0" y="-2.54" visible="off" length="short" direction="sup" rot="R90"/>
-</symbol>
 </symbols>
 <devicesets>
 <deviceset name="+5V" urn="urn:adsk.eagle:component:27032/1" prefix="SUPPLY" library_version="2">
 <description>&lt;b&gt;SUPPLY SYMBOL&lt;/b&gt;</description>
 <gates>
 <gate name="+5V" symbol="+05V" x="0" y="0"/>
-</gates>
-<devices>
-<device name="">
-<technologies>
-<technology name=""/>
-</technologies>
-</device>
-</devices>
-</deviceset>
-<deviceset name="+12V" urn="urn:adsk.eagle:component:27033/1" prefix="SUPPLY" library_version="2">
-<description>&lt;b&gt;SUPPLY SYMBOL&lt;/b&gt;</description>
-<gates>
-<gate name="+12V" symbol="+12V" x="0" y="0"/>
 </gates>
 <devices>
 <device name="">
@@ -7482,11 +7462,11 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <part name="5V" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+5V" device=""/>
 <part name="GND1" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
 <part name="X1" library="con-wago-500" library_urn="urn:adsk.eagle:library:195" deviceset="W237-102" device="" package3d_urn="urn:adsk.eagle:package:10688/1"/>
-<part name="BATT" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X2" device="" package3d_urn="urn:adsk.eagle:package:22435/2"/>
+<part name="BATT" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X2" device="" package3d_urn="urn:adsk.eagle:package:22435/2" value="3v7"/>
 <part name="WEMOS1" library="esp8266modules" deviceset="WEMOS-D1-MINI" device=""/>
 <part name="LUX-3V3" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
-<part name="IC2-3-5V" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
-<part name="IC2-2-3V3" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
+<part name="I2C-3-5V" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
+<part name="I2C-2-3V3" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
 <part name="R3" library="resistor" library_urn="urn:adsk.eagle:library:348" deviceset="R-EU_" device="0204/7" package3d_urn="urn:adsk.eagle:package:25945/1" value="100k"/>
 <part name="R4" library="resistor" library_urn="urn:adsk.eagle:library:348" deviceset="R-EU_" device="0204/7" package3d_urn="urn:adsk.eagle:package:25945/1" value="10k"/>
 <part name="S1" library="SparkFun-Switches" library_urn="urn:adsk.eagle:library:535" deviceset="SWITCH-SPDT" device="-PTH-11.6X4.0MM" package3d_urn="urn:adsk.eagle:package:40177/1" value="sleep"/>
@@ -7496,7 +7476,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <part name="5V1" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+5V" device=""/>
 <part name="5V2" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+5V" device=""/>
 <part name="GND5" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
-<part name="IC2-1-3V3" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
+<part name="I2C-1-3V3" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
 <part name="IC1" library="atmel" library_urn="urn:adsk.eagle:library:105" deviceset="TINY13" device="PU" package3d_urn="urn:adsk.eagle:package:4324/1" technology="-20" value="ATtiny85"/>
 <part name="GND6" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
 <part name="5V3" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+5V" device=""/>
@@ -7505,20 +7485,12 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <part name="USONIC" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
 <part name="5V4" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+5V" device=""/>
 <part name="GND7" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
-<part name="2222" library="transistor-neu-to92" library_urn="urn:adsk.eagle:library:397" deviceset="*-NPN-" device="TO92-EBC" package3d_urn="urn:adsk.eagle:package:28763/2" technology="2N2222"/>
+<part name="XTOR" library="transistor-neu-to92" library_urn="urn:adsk.eagle:library:397" deviceset="*-NPN-" device="TO92-EBC" package3d_urn="urn:adsk.eagle:package:28763/2" technology="2N2222" value="2222"/>
 <part name="R5" library="resistor" library_urn="urn:adsk.eagle:library:348" deviceset="R-EU_" device="0204/7" package3d_urn="urn:adsk.eagle:package:25945/1" value="120k"/>
 <part name="R6" library="resistor" library_urn="urn:adsk.eagle:library:348" deviceset="R-EU_" device="0204/7" package3d_urn="urn:adsk.eagle:package:25945/1" value="120k"/>
 <part name="+3V1" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="+3V3" device=""/>
 <part name="+3V2" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="+3V3" device=""/>
 <part name="+3V3" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="+3V3" device=""/>
-<part name="CHARGER1" library="con-lstb" library_urn="urn:adsk.eagle:library:162" deviceset="MA06-1" device="" package3d_urn="urn:adsk.eagle:package:8340/1" value="12v"/>
-<part name="GND8" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
-<part name="SUPPLY1" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+12V" device=""/>
-<part name="BATT1" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X2" device="" package3d_urn="urn:adsk.eagle:package:22435/2"/>
-<part name="X2" library="con-wago-500" library_urn="urn:adsk.eagle:library:195" deviceset="W237-102" device="" package3d_urn="urn:adsk.eagle:package:10688/1"/>
-<part name="12V" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X2" device="" package3d_urn="urn:adsk.eagle:package:22435/2"/>
-<part name="GND9" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
-<part name="SUPPLY2" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+12V" device=""/>
 </parts>
 <sheets>
 <sheet>
@@ -7533,8 +7505,8 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <instance part="BATT" gate="G$1" x="35.56" y="33.02"/>
 <instance part="WEMOS1" gate="D1" x="96.52" y="35.56"/>
 <instance part="LUX-3V3" gate="A" x="104.14" y="2.54"/>
-<instance part="IC2-3-5V" gate="A" x="81.28" y="2.54"/>
-<instance part="IC2-2-3V3" gate="A" x="68.58" y="2.54"/>
+<instance part="I2C-3-5V" gate="A" x="81.28" y="2.54"/>
+<instance part="I2C-2-3V3" gate="A" x="68.58" y="2.54"/>
 <instance part="R3" gate="G$1" x="60.96" y="43.18"/>
 <instance part="R4" gate="G$1" x="71.12" y="43.18"/>
 <instance part="S1" gate="1" x="58.42" y="30.48"/>
@@ -7544,7 +7516,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <instance part="5V1" gate="+5V" x="121.92" y="25.4" rot="R180"/>
 <instance part="5V2" gate="+5V" x="86.36" y="15.24"/>
 <instance part="GND5" gate="1" x="111.76" y="2.54"/>
-<instance part="IC2-1-3V3" gate="A" x="55.88" y="2.54"/>
+<instance part="I2C-1-3V3" gate="A" x="55.88" y="2.54"/>
 <instance part="IC1" gate="G$1" x="160.02" y="101.6"/>
 <instance part="GND6" gate="1" x="132.08" y="93.98"/>
 <instance part="5V3" gate="+5V" x="132.08" y="116.84"/>
@@ -7553,21 +7525,12 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <instance part="USONIC" gate="A" x="132.08" y="76.2"/>
 <instance part="5V4" gate="+5V" x="114.3" y="83.82"/>
 <instance part="GND7" gate="1" x="160.02" y="63.5"/>
-<instance part="2222" gate="G$1" x="157.48" y="76.2"/>
+<instance part="XTOR" gate="G$1" x="157.48" y="76.2"/>
 <instance part="R5" gate="G$1" x="152.4" y="58.42"/>
 <instance part="R6" gate="G$1" x="147.32" y="71.12" rot="R90"/>
 <instance part="+3V1" gate="G$1" x="73.66" y="27.94" rot="R90"/>
 <instance part="+3V2" gate="G$1" x="38.1" y="7.62" rot="R90"/>
 <instance part="+3V3" gate="G$1" x="93.98" y="12.7"/>
-<instance part="CHARGER1" gate="1" x="38.1" y="86.36"/>
-<instance part="GND8" gate="1" x="66.04" y="86.36"/>
-<instance part="SUPPLY1" gate="+12V" x="58.42" y="93.98"/>
-<instance part="BATT1" gate="G$1" x="35.56" y="22.86"/>
-<instance part="X2" gate="-1" x="10.16" y="55.88"/>
-<instance part="X2" gate="-2" x="10.16" y="50.8"/>
-<instance part="12V" gate="G$1" x="17.78" y="5.08"/>
-<instance part="GND9" gate="1" x="0" y="2.54"/>
-<instance part="SUPPLY2" gate="+12V" x="0" y="10.16"/>
 </instances>
 <busses>
 </busses>
@@ -7593,22 +7556,12 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <segment>
 <pinref part="X1" gate="-2" pin="KL"/>
 <pinref part="GND2" gate="1" pin="GND"/>
-<wire x1="17.78" y1="63.5" x2="25.4" y2="63.5" width="0.1524" layer="91"/>
-<pinref part="X2" gate="-2" pin="KL"/>
-<wire x1="25.4" y1="63.5" x2="27.94" y2="63.5" width="0.1524" layer="91"/>
-<wire x1="15.24" y1="50.8" x2="25.4" y2="50.8" width="0.1524" layer="91"/>
-<wire x1="25.4" y1="50.8" x2="25.4" y2="63.5" width="0.1524" layer="91"/>
-<junction x="25.4" y="63.5"/>
+<wire x1="17.78" y1="63.5" x2="27.94" y2="63.5" width="0.1524" layer="91"/>
 </segment>
 <segment>
 <pinref part="BATT" gate="G$1" pin="2"/>
 <pinref part="GND3" gate="1" pin="GND"/>
-<wire x1="33.02" y1="33.02" x2="15.24" y2="33.02" width="0.1524" layer="91"/>
-<pinref part="BATT1" gate="G$1" pin="2"/>
-<wire x1="15.24" y1="33.02" x2="10.16" y2="33.02" width="0.1524" layer="91"/>
-<wire x1="33.02" y1="22.86" x2="15.24" y2="22.86" width="0.1524" layer="91"/>
-<wire x1="15.24" y1="22.86" x2="15.24" y2="33.02" width="0.1524" layer="91"/>
-<junction x="15.24" y="33.02"/>
+<wire x1="33.02" y1="33.02" x2="10.16" y2="33.02" width="0.1524" layer="91"/>
 </segment>
 <segment>
 <pinref part="WEMOS1" gate="D1" pin="GND"/>
@@ -7619,13 +7572,13 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <pinref part="GND5" gate="1" pin="GND"/>
 <pinref part="LUX-3V3" gate="A" pin="2"/>
 <wire x1="111.76" y1="5.08" x2="101.6" y2="5.08" width="0.1524" layer="91"/>
-<pinref part="IC2-3-5V" gate="A" pin="2"/>
+<pinref part="I2C-3-5V" gate="A" pin="2"/>
 <wire x1="101.6" y1="5.08" x2="78.74" y2="5.08" width="0.1524" layer="91"/>
 <junction x="101.6" y="5.08"/>
-<pinref part="IC2-2-3V3" gate="A" pin="2"/>
+<pinref part="I2C-2-3V3" gate="A" pin="2"/>
 <wire x1="78.74" y1="5.08" x2="66.04" y2="5.08" width="0.1524" layer="91"/>
 <junction x="78.74" y="5.08"/>
-<pinref part="IC2-1-3V3" gate="A" pin="2"/>
+<pinref part="I2C-1-3V3" gate="A" pin="2"/>
 <wire x1="66.04" y1="5.08" x2="53.34" y2="5.08" width="0.1524" layer="91"/>
 <junction x="66.04" y="5.08"/>
 </segment>
@@ -7635,31 +7588,12 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <wire x1="139.7" y1="96.52" x2="132.08" y2="96.52" width="0.1524" layer="91"/>
 </segment>
 <segment>
-<pinref part="2222" gate="G$1" pin="E"/>
+<pinref part="XTOR" gate="G$1" pin="E"/>
 <pinref part="GND7" gate="1" pin="GND"/>
 <wire x1="160.02" y1="66.04" x2="160.02" y2="71.12" width="0.1524" layer="91"/>
 <pinref part="R6" gate="G$1" pin="1"/>
 <wire x1="147.32" y1="66.04" x2="160.02" y2="66.04" width="0.1524" layer="91"/>
 <junction x="160.02" y="66.04"/>
-</segment>
-<segment>
-<pinref part="CHARGER1" gate="1" pin="5"/>
-<pinref part="GND8" gate="1" pin="GND"/>
-<wire x1="45.72" y1="88.9" x2="60.96" y2="88.9" width="0.1524" layer="91"/>
-<pinref part="CHARGER1" gate="1" pin="4"/>
-<wire x1="60.96" y1="88.9" x2="66.04" y2="88.9" width="0.1524" layer="91"/>
-<wire x1="45.72" y1="86.36" x2="60.96" y2="86.36" width="0.1524" layer="91"/>
-<wire x1="60.96" y1="86.36" x2="60.96" y2="88.9" width="0.1524" layer="91"/>
-<junction x="60.96" y="88.9"/>
-<pinref part="CHARGER1" gate="1" pin="2"/>
-<wire x1="45.72" y1="81.28" x2="53.34" y2="81.28" width="0.1524" layer="91"/>
-<wire x1="53.34" y1="81.28" x2="60.96" y2="86.36" width="0.1524" layer="91"/>
-<junction x="60.96" y="86.36"/>
-</segment>
-<segment>
-<pinref part="12V" gate="G$1" pin="2"/>
-<pinref part="GND9" gate="1" pin="GND"/>
-<wire x1="15.24" y1="5.08" x2="0" y2="5.08" width="0.1524" layer="91"/>
 </segment>
 </net>
 <net name="BAT+" class="0">
@@ -7720,7 +7654,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <wire x1="129.54" y1="81.28" x2="114.3" y2="81.28" width="0.1524" layer="91"/>
 </segment>
 <segment>
-<pinref part="IC2-3-5V" gate="A" pin="1"/>
+<pinref part="I2C-3-5V" gate="A" pin="1"/>
 <wire x1="78.74" y1="7.62" x2="86.36" y2="7.62" width="0.1524" layer="91"/>
 <pinref part="5V2" gate="+5V" pin="+5V"/>
 <wire x1="86.36" y1="7.62" x2="86.36" y2="12.7" width="0.1524" layer="91"/>
@@ -7731,11 +7665,11 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <pinref part="LUX-3V3" gate="A" pin="3"/>
 <wire x1="101.6" y1="2.54" x2="78.74" y2="2.54" width="0.1524" layer="91"/>
 <label x="86.36" y="2.54" size="1.778" layer="95"/>
-<pinref part="IC2-2-3V3" gate="A" pin="3"/>
-<pinref part="IC2-3-5V" gate="A" pin="3"/>
+<pinref part="I2C-2-3V3" gate="A" pin="3"/>
+<pinref part="I2C-3-5V" gate="A" pin="3"/>
 <wire x1="66.04" y1="2.54" x2="78.74" y2="2.54" width="0.1524" layer="91"/>
 <junction x="78.74" y="2.54"/>
-<pinref part="IC2-1-3V3" gate="A" pin="3"/>
+<pinref part="I2C-1-3V3" gate="A" pin="3"/>
 <wire x1="53.34" y1="2.54" x2="66.04" y2="2.54" width="0.1524" layer="91"/>
 <junction x="66.04" y="2.54"/>
 </segment>
@@ -7759,11 +7693,11 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <pinref part="LUX-3V3" gate="A" pin="4"/>
 <wire x1="101.6" y1="0" x2="78.74" y2="0" width="0.1524" layer="91"/>
 <label x="86.36" y="0" size="1.778" layer="95"/>
-<pinref part="IC2-2-3V3" gate="A" pin="4"/>
-<pinref part="IC2-3-5V" gate="A" pin="4"/>
+<pinref part="I2C-2-3V3" gate="A" pin="4"/>
+<pinref part="I2C-3-5V" gate="A" pin="4"/>
 <wire x1="66.04" y1="0" x2="78.74" y2="0" width="0.1524" layer="91"/>
 <junction x="78.74" y="0"/>
-<pinref part="IC2-1-3V3" gate="A" pin="4"/>
+<pinref part="I2C-1-3V3" gate="A" pin="4"/>
 <wire x1="66.04" y1="0" x2="53.34" y2="0" width="0.1524" layer="91"/>
 <junction x="66.04" y="0"/>
 </segment>
@@ -7835,7 +7769,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 </net>
 <net name="N$9" class="0">
 <segment>
-<pinref part="2222" gate="G$1" pin="C"/>
+<pinref part="XTOR" gate="G$1" pin="C"/>
 <wire x1="160.02" y1="81.28" x2="137.16" y2="81.28" width="0.1524" layer="91"/>
 <wire x1="137.16" y1="81.28" x2="137.16" y2="68.58" width="0.1524" layer="91"/>
 <wire x1="137.16" y1="68.58" x2="121.92" y2="68.58" width="0.1524" layer="91"/>
@@ -7847,7 +7781,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <net name="N$10" class="0">
 <segment>
 <pinref part="R6" gate="G$1" pin="2"/>
-<pinref part="2222" gate="G$1" pin="B"/>
+<pinref part="XTOR" gate="G$1" pin="B"/>
 <wire x1="147.32" y1="76.2" x2="154.94" y2="76.2" width="0.1524" layer="91"/>
 <wire x1="147.32" y1="76.2" x2="139.7" y2="76.2" width="0.1524" layer="91"/>
 <junction x="147.32" y="76.2"/>
@@ -7875,10 +7809,10 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <wire x1="81.28" y1="27.94" x2="76.2" y2="27.94" width="0.1524" layer="91"/>
 </segment>
 <segment>
-<pinref part="IC2-1-3V3" gate="A" pin="1"/>
+<pinref part="I2C-1-3V3" gate="A" pin="1"/>
 <pinref part="+3V2" gate="G$1" pin="+3V3"/>
 <wire x1="53.34" y1="7.62" x2="40.64" y2="7.62" width="0.1524" layer="91"/>
-<pinref part="IC2-2-3V3" gate="A" pin="1"/>
+<pinref part="I2C-2-3V3" gate="A" pin="1"/>
 <wire x1="53.34" y1="7.62" x2="66.04" y2="7.62" width="0.1524" layer="91"/>
 <junction x="53.34" y="7.62"/>
 </segment>
@@ -7889,45 +7823,12 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <wire x1="93.98" y1="7.62" x2="101.6" y2="7.62" width="0.1524" layer="91"/>
 </segment>
 </net>
-<net name="+12V" class="1">
-<segment>
-<pinref part="CHARGER1" gate="1" pin="6"/>
-<pinref part="SUPPLY1" gate="+12V" pin="+12V"/>
-<wire x1="45.72" y1="91.44" x2="58.42" y2="91.44" width="0.1524" layer="91"/>
-</segment>
-<segment>
-<pinref part="12V" gate="G$1" pin="1"/>
-<pinref part="SUPPLY2" gate="+12V" pin="+12V"/>
-<wire x1="15.24" y1="7.62" x2="0" y2="7.62" width="0.1524" layer="91"/>
-</segment>
-</net>
-<net name="SOLAR12+" class="0">
-<segment>
-<pinref part="CHARGER1" gate="1" pin="1"/>
-<wire x1="45.72" y1="78.74" x2="53.34" y2="78.74" width="0.1524" layer="91"/>
-<label x="53.34" y="78.74" size="1.778" layer="95"/>
-</segment>
-<segment>
-<pinref part="X2" gate="-1" pin="KL"/>
-<wire x1="15.24" y1="55.88" x2="17.78" y2="55.88" width="0.1524" layer="91"/>
-<label x="15.24" y="55.88" size="1.778" layer="95"/>
-</segment>
-</net>
-<net name="BAT12+" class="0">
-<segment>
-<pinref part="BATT1" gate="G$1" pin="1"/>
-<wire x1="33.02" y1="25.4" x2="22.86" y2="25.4" width="0.1524" layer="91"/>
-<label x="17.78" y="25.4" size="1.778" layer="95"/>
-</segment>
-<segment>
-<pinref part="CHARGER1" gate="1" pin="3"/>
-<wire x1="45.72" y1="83.82" x2="48.26" y2="83.82" width="0.1524" layer="91"/>
-<label x="45.72" y="83.82" size="1.778" layer="95"/>
-</segment>
-</net>
 </nets>
 </sheet>
 </sheets>
+<errors>
+<approved hash="104,1,139.7,114.3,IC1,VCC,+5V,,,"/>
+</errors>
 </schematic>
 </drawing>
 <compatibility>

@@ -3,7 +3,7 @@
 <eagle version="9.0.1">
 <drawing>
 <settings>
-<setting alwaysvectorfont="no"/>
+<setting alwaysvectorfont="yes"/>
 <setting verticaltext="up"/>
 </settings>
 <grid distance="0.1" unitdist="inch" unit="inch" style="lines" multiple="1" display="no" altdistance="0.01" altunitdist="inch" altunit="inch"/>
@@ -7461,7 +7461,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <part name="CHARGER" library="con-lstb" library_urn="urn:adsk.eagle:library:162" deviceset="MA06-1" device="" package3d_urn="urn:adsk.eagle:package:8340/1" value="5v"/>
 <part name="5V" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+5V" device=""/>
 <part name="GND1" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
-<part name="X1" library="con-wago-500" library_urn="urn:adsk.eagle:library:195" deviceset="W237-102" device="" package3d_urn="urn:adsk.eagle:package:10688/1"/>
+<part name="SOLAR" library="con-wago-500" library_urn="urn:adsk.eagle:library:195" deviceset="W237-102" device="" package3d_urn="urn:adsk.eagle:package:10688/1"/>
 <part name="BATT" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X2" device="" package3d_urn="urn:adsk.eagle:package:22435/2" value="3v7"/>
 <part name="WEMOS1" library="esp8266modules" deviceset="WEMOS-D1-MINI" device=""/>
 <part name="LUX-3V3" library="pinhead" library_urn="urn:adsk.eagle:library:325" deviceset="PINHD-1X4" device="" package3d_urn="urn:adsk.eagle:package:22407/2"/>
@@ -7486,8 +7486,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <part name="5V4" library="supply2" library_urn="urn:adsk.eagle:library:372" deviceset="+5V" device=""/>
 <part name="GND7" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="GND" device=""/>
 <part name="XTOR" library="transistor-neu-to92" library_urn="urn:adsk.eagle:library:397" deviceset="*-NPN-" device="TO92-EBC" package3d_urn="urn:adsk.eagle:package:28763/2" technology="2N2222" value="2222"/>
-<part name="R5" library="resistor" library_urn="urn:adsk.eagle:library:348" deviceset="R-EU_" device="0204/7" package3d_urn="urn:adsk.eagle:package:25945/1" value="120k"/>
-<part name="R6" library="resistor" library_urn="urn:adsk.eagle:library:348" deviceset="R-EU_" device="0204/7" package3d_urn="urn:adsk.eagle:package:25945/1" value="120k"/>
+<part name="R5" library="resistor" library_urn="urn:adsk.eagle:library:348" deviceset="R-EU_" device="0204/7" package3d_urn="urn:adsk.eagle:package:25945/1" value="270"/>
 <part name="+3V1" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="+3V3" device=""/>
 <part name="+3V2" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="+3V3" device=""/>
 <part name="+3V3" library="supply1" library_urn="urn:adsk.eagle:library:371" deviceset="+3V3" device=""/>
@@ -7500,8 +7499,8 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <instance part="CHARGER" gate="1" x="50.8" y="63.5"/>
 <instance part="5V" gate="+5V" x="83.82" y="71.12"/>
 <instance part="GND1" gate="1" x="83.82" y="63.5"/>
-<instance part="X1" gate="-1" x="12.7" y="68.58"/>
-<instance part="X1" gate="-2" x="12.7" y="63.5"/>
+<instance part="SOLAR" gate="-1" x="12.7" y="68.58"/>
+<instance part="SOLAR" gate="-2" x="12.7" y="63.5"/>
 <instance part="BATT" gate="G$1" x="35.56" y="33.02"/>
 <instance part="WEMOS1" gate="D1" x="96.52" y="35.56"/>
 <instance part="LUX-3V3" gate="A" x="104.14" y="2.54"/>
@@ -7527,7 +7526,6 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <instance part="GND7" gate="1" x="160.02" y="63.5"/>
 <instance part="XTOR" gate="G$1" x="157.48" y="76.2"/>
 <instance part="R5" gate="G$1" x="152.4" y="58.42"/>
-<instance part="R6" gate="G$1" x="147.32" y="71.12" rot="R90"/>
 <instance part="+3V1" gate="G$1" x="73.66" y="27.94" rot="R90"/>
 <instance part="+3V2" gate="G$1" x="38.1" y="7.62" rot="R90"/>
 <instance part="+3V3" gate="G$1" x="93.98" y="12.7"/>
@@ -7554,7 +7552,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <junction x="76.2" y="63.5"/>
 </segment>
 <segment>
-<pinref part="X1" gate="-2" pin="KL"/>
+<pinref part="SOLAR" gate="-2" pin="KL"/>
 <pinref part="GND2" gate="1" pin="GND"/>
 <wire x1="17.78" y1="63.5" x2="27.94" y2="63.5" width="0.1524" layer="91"/>
 </segment>
@@ -7591,9 +7589,6 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <pinref part="XTOR" gate="G$1" pin="E"/>
 <pinref part="GND7" gate="1" pin="GND"/>
 <wire x1="160.02" y1="66.04" x2="160.02" y2="71.12" width="0.1524" layer="91"/>
-<pinref part="R6" gate="G$1" pin="1"/>
-<wire x1="147.32" y1="66.04" x2="160.02" y2="66.04" width="0.1524" layer="91"/>
-<junction x="160.02" y="66.04"/>
 </segment>
 </net>
 <net name="BAT+" class="0">
@@ -7615,7 +7610,7 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 <label x="63.5" y="55.88" size="1.778" layer="95"/>
 </segment>
 <segment>
-<pinref part="X1" gate="-1" pin="KL"/>
+<pinref part="SOLAR" gate="-1" pin="KL"/>
 <wire x1="17.78" y1="68.58" x2="22.86" y2="68.58" width="0.1524" layer="91"/>
 <label x="20.32" y="68.58" size="1.778" layer="95"/>
 </segment>
@@ -7780,11 +7775,8 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 </net>
 <net name="N$10" class="0">
 <segment>
-<pinref part="R6" gate="G$1" pin="2"/>
 <pinref part="XTOR" gate="G$1" pin="B"/>
-<wire x1="147.32" y1="76.2" x2="154.94" y2="76.2" width="0.1524" layer="91"/>
-<wire x1="147.32" y1="76.2" x2="139.7" y2="76.2" width="0.1524" layer="91"/>
-<junction x="147.32" y="76.2"/>
+<wire x1="154.94" y1="76.2" x2="139.7" y2="76.2" width="0.1524" layer="91"/>
 <wire x1="139.7" y1="76.2" x2="139.7" y2="58.42" width="0.1524" layer="91"/>
 <pinref part="R5" gate="G$1" pin="1"/>
 <wire x1="139.7" y1="58.42" x2="147.32" y2="58.42" width="0.1524" layer="91"/>
@@ -7828,6 +7820,13 @@ http://www.ee.siue.edu/~alozows/library/datasheets/BFR96.pdf</description>
 </sheets>
 <errors>
 <approved hash="104,1,139.7,114.3,IC1,VCC,+5V,,,"/>
+<approved hash="113,1,11.8855,68.58,SOLAR,,,,,"/>
+<approved hash="113,1,97.79,36.7767,WEMOS1,,,,,"/>
+<approved hash="113,1,103.032,5.30606,LUX-3V3,,,,,"/>
+<approved hash="113,1,80.7602,5.30606,I2C-3-5V,,,,,"/>
+<approved hash="113,1,68.7966,5.30606,I2C-2-3V3,,,,,"/>
+<approved hash="113,1,56.0966,5.30606,I2C-1-3V3,,,,,"/>
+<approved hash="113,1,129.787,78.9661,USONIC,,,,,"/>
 </errors>
 </schematic>
 </drawing>

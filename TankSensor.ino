@@ -7,13 +7,12 @@
 
 #include <SPI.h>
 #include <ESP8266HTTPClient.h>
-#include <hardwareSerial.h>
 #include <ESP8266httpUpdate.h>
 #include <WiFiClient.h>
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.16"
+#define _MYVERSION	"tank_1.2"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -56,7 +55,7 @@
 #define _AP_SLEEP_TIMEOUT_FOREVER	-1
 #endif
 
-//#define _SCAN_I2C
+#define _SCAN_I2C
 
 //#define _TRY_PING
 #include <ESP8266Ping.h>
@@ -65,10 +64,13 @@
 
 
 // my libs
+#include <debugLogger.h>
+SerialDebug debugger(debug::dbVerbose);
+
 #include <myWifi.h>
-myWifiClass wifiInstance("wemos_");
+myWifiClass wifiInstance("wemos_", &debugger);
 
-
+#include <atUltra.h>
 
 #include <BME280I2C.h>
 
@@ -90,6 +92,7 @@ BME280I2C::Settings mySettings = {
 
 BME280I2C bme(mySettings);
 Max44009 lux(0x4a);
+ATultrasonic ultra;
 
 struct {
 	unsigned version;
@@ -124,19 +127,6 @@ unsigned long millisAtBoot = millis();
 unsigned long lastSeenTraffic = 0;
 //#define _CLEAR_DATA
 
-#define _MOVE_SDASCL
-
-#ifdef _MOVE_SDASCL
-// controls the gated ground
-#define TRAN_PIN	D1
-// pin for pw reading of ultrasonic sensor
-#define ULTRA_PULSE	D2
-#else
-// controls the gated ground
-#define TRAN_PIN	D3
-// pin for pw reading of ultrasonic sensor
-#define ULTRA_PULSE	D4
-#endif
 // D4 is built in LED
 
 // the setup function runs once when you press reset or power the board
@@ -144,40 +134,37 @@ void setup() {
 
 
 
-	Serial.begin(115200);
+	debugger.begin(9600);
 	///Serial.setTimeout(2000);
-	pinMode(TRAN_PIN, OUTPUT);
-	digitalWrite(TRAN_PIN, LOW);
 
-	DEBUG(DEBUG_IMPORTANT, Serial.printf("Awake. version %s\n\r",_MYVERSION));
-	digitalWrite(TRAN_PIN, HIGH);
+	debugger.printf(debug::dbImportant, "Awake. version %s\n\r",_MYVERSION);
 
 
 	// 
 	if (!SD.begin(D8))
 	{
-		DEBUG(DEBUG_ERROR,Serial.println("SD card failed"));
+		debugger.println(debug::dbError, "SD card failed");
 	}
 
 	if(!SPIFFS.begin())
 	{
-		DEBUG(DEBUG_ERROR, Serial.println("SPIFFS failed"));
+		debugger.println(debug::dbError, "SPIFFS failed");
 	}
 
 	// special case
 	if (SPIFFS.exists(_SPIFF_RESET_FLAG_FILE))
 	{
-		DEBUG(DEBUG_IMPORTANT, Serial.println("Resetting"));
+		debugger.println(debug::dbImportant, "Resetting");
 		SD.remove(_JSON_DATA_FILE);
 		if (
 			SD.remove(_JSON_CONFIG_FILE) )
 		{
 			SPIFFS.remove(_SPIFF_RESET_FLAG_FILE);
-			DEBUG(DEBUG_IMPORTANT, Serial.println("Deleting config - reset.txt"));
+			debugger.println(debug::dbImportant, "Deleting config - reset.txt");
 		}
 		else
 		{
-			DEBUG(DEBUG_ERROR, Serial.println("FAILED Deleting config- reset.txt"));
+			debugger.println(debug::dbError, "FAILED Deleting config- reset.txt");
 		}
 	}
 
@@ -191,7 +178,7 @@ void setup() {
 		wifiInstance.ConnectWifi(myWifiClass::modeAP, config.wifi);
 
 		// begin the servers
-		DEBUG(DEBUG_VERBOSE, Serial.println("serving static pages"));
+		debugger.println(debug::dbVerbose, "serving static pages");
 
 		wifiInstance.server.on("/", HTTP_GET, []() {
 
@@ -209,7 +196,7 @@ void setup() {
 
 		wifiInstance.server.on("/stopAP", []() {
 
-			DEBUG(DEBUG_VERBOSE, Serial.println("/stopAP"));
+			debugger.println(debug::dbVerbose, "/stopAP");
 			lastSeenTraffic = millis();
 
 			if (wifiInstance.currentMode == myWifiClass::wifiMode::modeSTAandAP)
@@ -225,8 +212,7 @@ void setup() {
 
 		wifiInstance.server.on("/json/config", HTTP_GET, []() {
 			// give them back the port / switch map
-
-			DEBUG(DEBUG_INFO, Serial.println("json config called"));
+			debugger.println(debug::dbInfo, "json config called");
 			lastSeenTraffic = millis();
 
 			DynamicJsonBuffer jsonBuffer;
@@ -239,7 +225,7 @@ void setup() {
 			String jsonText;
 			root.prettyPrintTo(jsonText);
 
-			DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
+			debugger.println(debug::dbVerbose, jsonText);
 
 			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 			wifiInstance.server.send(200, "application/json", jsonText);
@@ -248,7 +234,7 @@ void setup() {
 		wifiInstance.server.on("/json/wificonfig", HTTP_GET, []() {
 			// give them back the port / switch map
 
-			DEBUG(DEBUG_INFO, Serial.println("json wificonfig called"));
+			debugger.println(debug::dbInfo, "json wificonfig called");
 			lastSeenTraffic = millis();
 
 			DynamicJsonBuffer jsonBuffer;
@@ -262,7 +248,7 @@ void setup() {
 			String jsonText;
 			root.prettyPrintTo(jsonText);
 
-			DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
+			debugger.println(debug::dbVerbose, jsonText);
 
 			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 			wifiInstance.server.send(200, "application/json", jsonText);
@@ -273,7 +259,7 @@ void setup() {
 			// give them back the port / switch map
 
 			lastSeenTraffic = millis();
-			DEBUG(DEBUG_INFO, Serial.println("json wifi called"));
+			debugger.println(debug::dbInfo, "json wifi called");
 
 			DynamicJsonBuffer jsonBuffer;
 
@@ -293,7 +279,7 @@ void setup() {
 				wifi["ssid"] = allWifis[each].first;
 				wifi["sig"] = allWifis[each].second;
 
-				DEBUG(DEBUG_INFO, Serial.printf("%d '%s' %d \n\r", each + 1, allWifis[each].first.c_str(), allWifis[each].second));
+				debugger.printf(debug::dbInfo, "%d '%s' %d \n\r", each + 1, allWifis[each].first.c_str(), allWifis[each].second);
 
 			}
 
@@ -304,7 +290,7 @@ void setup() {
 			String jsonText;
 			root.prettyPrintTo(jsonText);
 
-			DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
+			debugger.println(debug::dbVerbose, jsonText);
 
 			// do not cache
 			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -314,8 +300,8 @@ void setup() {
 		wifiInstance.server.on("/json/wifi", HTTP_POST, []() {
 
 			lastSeenTraffic = millis();
-			DEBUG(DEBUG_INFO, Serial.println("json wifi posted"));
-			DEBUG(DEBUG_INFO, Serial.println(wifiInstance.server.arg("plain")));
+			debugger.println(debug::dbInfo, "json wifi posted");
+			debugger.println(debug::dbInfo, wifiInstance.server.arg("plain"));
 
 			DynamicJsonBuffer jsonBuffer;
 			// 'plain' is the secret source to get to the body
@@ -352,15 +338,15 @@ void setup() {
 			{
 #ifdef _PING_CAN_BE_TOLD_WHICH_ITF_TO_USE
 				// IIF we can ping the host, we accept this
-				DEBUG(DEBUG_VERBOSE, Serial.printf("confirming a ping to %s\n\r", config.postHost.toString().c_str()));
+				debugger.printf(debug::dbVerbose, "confirming a ping to %s\n\r", config.postHost.toString().c_str());
 				if (Ping.ping(config.postHost,3))
 				{
-					DEBUG(DEBUG_IMPORTANT, Serial.println("PING success"));
+					debugger.println(debug::dbImportant, "PING success");
 					config.wifi.configured = true;
 				}
 				else
 				{
-					DEBUG(DEBUG_IMPORTANT, Serial.println("PING FAILED, reverting"));
+					debugger.println(debug::dbImportant, "PING FAILED, reverting");
 					config.wifi.configured = false;
 					wifiInstance.ConnectWifi(myWifiClass::wifiMode::modeAP, config.wifi);
 				}
@@ -370,7 +356,7 @@ void setup() {
 			}
 			else
 			{
-				DEBUG(DEBUG_IMPORTANT, Serial.println("Speculative join failed"));
+				debugger.println(debug::dbImportant, "Speculative join failed");
 				config.wifi.configured = false;
 			}
 
@@ -394,7 +380,7 @@ void setup() {
 			// cache it for an hour
 			wifiInstance.server.serveStatic(file.c_str(), SPIFFS, file.c_str(), "Cache-Control: public, max-age=60");
 
-			DEBUG(DEBUG_VERBOSE, Serial.printf("Serving %s\n\r", file.c_str()));
+			debugger.printf(debug::dbVerbose, "Serving %s\n\r", file.c_str());
 
 		}
 	}
@@ -442,7 +428,7 @@ void setup() {
 
 bool readConfig()
 {
-	DEBUG(DEBUG_VERBOSE, Serial.println("reading config"));
+	debugger.println(debug::dbVerbose, "reading config");
 
 	// try to read the config - if it fails, create the default
 	File configFile=SD.open(_JSON_CONFIG_FILE, O_READ);
@@ -450,7 +436,7 @@ bool readConfig()
 	if (!configFile)
 	{
 		writeConfig();
-		DEBUG(DEBUG_VERBOSE, Serial.println("config file missing"));
+		debugger.println(debug::dbVerbose, "config file missing");
 		return false;
 	}
 
@@ -470,7 +456,7 @@ bool readConfig()
 		config.samplePeriodMins = root["samplePeriodMin"];
 
 #ifndef _SLEEP_PERCHANCE_TO_DREAM
-	config.samplePeriodMins = 1;
+	config.samplePeriodMins = 10;
 #endif
 
 	config.iterationSent=root["lastIterSent"];
@@ -481,9 +467,9 @@ bool readConfig()
 	config.postHostPort = root["hostPort"];
 
 
-	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer readconfig size %d\n\r", jsonBuffer.size()));
+	debugger.printf(debug::dbVerbose, "DynamicJsonBuffer readconfig size %d\n\r", jsonBuffer.size());
 
-	DEBUG(DEBUG_VERBOSE, Serial.println(configText));
+	debugger.println(debug::dbVerbose, configText);
 
 
 	return true;
@@ -492,7 +478,7 @@ bool readConfig()
 bool writeConfig()
 {
 
-	DEBUG(DEBUG_VERBOSE, Serial.printf("writing config %d \n\r", ESP.getFreeHeap()));
+	debugger.printf(debug::dbVerbose, "writing config %d \n\r", ESP.getFreeHeap());
 
 	DynamicJsonBuffer jsonBuffer;
 
@@ -515,21 +501,21 @@ bool writeConfig()
 
 	if (!configFile)
 	{
-		DEBUG(DEBUG_ERROR, Serial.println("could not create config"));
+		debugger.println(debug::dbError, "could not create config");
 		return false;
 	}
 	else
 	{
-		DEBUG(DEBUG_VERBOSE, Serial.println("config opened"));
+		debugger.println(debug::dbVerbose, "config opened");
 	}
 
 	configFile.println(jsonText.c_str());
 
 	configFile.close();
 
-	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer writeconfig size %d\n\r", jsonBuffer.size()));
-	DEBUG(DEBUG_VERBOSE, Serial.println(jsonText));
-	DEBUG(DEBUG_VERBOSE, Serial.println("written"));
+	debugger.printf(debug::dbVerbose, "DynamicJsonBuffer writeconfig size %d\n\r", jsonBuffer.size());
+	debugger.println(debug::dbVerbose, jsonText);
+	debugger.println(debug::dbVerbose, "written");
 
 	return true;
 
@@ -539,20 +525,20 @@ bool writeConfig()
 
 bool appendData(JsonObject &data)
 {
-	DEBUG(DEBUG_VERBOSE, Serial.println("appending data"));
+	debugger.println(debug::dbVerbose, "appending data");
 
 	File dataFile = SD.open(_JSON_DATA_FILE, FILE_WRITE | O_APPEND);
 	if (!dataFile)
 	{
 		dataFile.close();
-		DEBUG(DEBUG_ERROR, Serial.println("could not create data"));
+		debugger.println(debug::dbError, "could not create data");
 		return false;
 	}
 	if (dataFile.size() < _MAX_JSON_DATA_SIZE)
 	{
 		String dataText;
 		data.printTo(dataText);
-		DEBUG(DEBUG_VERBOSE, Serial.println(dataText));
+		debugger.println(debug::dbVerbose, dataText);
 
 		dataFile.println(dataText.c_str());
 
@@ -560,7 +546,7 @@ bool appendData(JsonObject &data)
 	}
 	else
 	{
-		DEBUG(DEBUG_VERBOSE, Serial.println("skipping addition, hostory too big"));
+		debugger.println(debug::dbVerbose, "skipping addition, hostory too big");
 	}
 
 	return true;
@@ -569,7 +555,7 @@ bool appendData(JsonObject &data)
 void GoToSleep(unsigned millisseconds)
 {
 	unsigned tempSeconds = millisseconds / 1000;
-	DEBUG(DEBUG_IMPORTANT,Serial.printf("Going into deep sleep for %d mins %d secs\n\r", tempSeconds/60, tempSeconds%60));
+	debugger.printf(debug::dbImportant, "Going into deep sleep for %d mins %d secs\n\r", tempSeconds/60, tempSeconds%60);
 
 	// Connect D0 to RST to wake up
 	pinMode(D0, WAKEUP_PULLUP);
@@ -634,7 +620,7 @@ void loop()
 
 		if (millis() - lastSeenTraffic > sleepTimeOut)
 		{
-			DEBUG(DEBUG_IMPORTANT, Serial.printf("%s deadline exceeded - battery saving - sleeping forerver, sleeping %lu ms\n\r",reason.c_str(),sleepTime));
+			debugger.printf(debug::dbImportant, "%s deadline exceeded - battery saving - sleeping forerver, sleeping %lu ms\n\r",reason.c_str(),sleepTime);
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
 			GoToSleep(sleepTime);
 #else
@@ -647,7 +633,10 @@ void loop()
 
 	unsigned long millisAtStart = millis();
 
-	DEBUG(DEBUG_INFO, Serial.printf("IP address: %s GW %s\n\r", WiFi.localIP().toString().c_str(),WiFi.gatewayIP().toString().c_str()));
+	debugger.printf(debug::dbInfo, "IP address: %s GW %s\n\r", WiFi.localIP().toString().c_str(),WiFi.gatewayIP().toString().c_str());
+
+	int millimetres, numSamples, status;
+	ultra.GetReading(millimetres, numSamples, status);
 
 
 	// end server
@@ -662,22 +651,22 @@ void loop()
 	JsonObject &dataNow = jsonBuffer.createObject();
 
 	dataNow["iter"] = ++config.iteration;
-	dataNow["distCM"] = readDistanceCMS_Pulse(5);
+	dataNow["distCM"] = millimetres /10;
 	dataNow["tempC"] = temp;
 	dataNow["humid%"] = humidity;
 	dataNow["pressMB"] = pressure;
 	dataNow["lux"] = readLux();
 	dataNow["lipo"] = readLIPOvoltage();
 
-	DEBUG(DEBUG_VERBOSE, Serial.println("new data"));
-	DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size()));
+	debugger.println(debug::dbVerbose, "new data");
+	debugger.printf(debug::dbVerbose, "DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size());
 
 	String returnPayload;
 
 	// if we're not connected, or if the datafile ALREADY exists, append this blob onto the back
 	if ((WiFi.status() != WL_CONNECTED) || SD.exists(_JSON_DATA_FILE))
 	{
-		DEBUG(DEBUG_VERBOSE, Serial.println(SD.exists(_JSON_DATA_FILE)?"existing stale data":"wifi problem"));
+		debugger.println(debug::dbVerbose, SD.exists(_JSON_DATA_FILE)?"existing stale data":"wifi problem");
 		// append
 		appendData(dataNow);
 
@@ -721,7 +710,7 @@ void loop()
 			config.iterationSent = config.iteration;;
 			break;
 		default:
-			DEBUG(DEBUG_VERBOSE, Serial.println("retry later"));
+			debugger.println(debug::dbVerbose, "retry later");
 			appendData(dataNow);
 			break;
 		}
@@ -741,10 +730,10 @@ void loop()
 	{
 		if (serverInfo.containsKey("reset"))
 		{
-			DEBUG(DEBUG_INFO, Serial.println("response includes reset key"));
+			debugger.println(debug::dbInfo, "response includes reset key");
 			if (serverInfo["reset"] == true)
 			{
-				DEBUG(DEBUG_IMPORTANT, Serial.println("reset is true"));
+				debugger.println(debug::dbImportant, "reset is true");
 				SD.remove(_JSON_CONFIG_FILE);
 				SD.remove(_JSON_DATA_FILE);
 				// reboot immediately if we're not going to uograde
@@ -762,20 +751,20 @@ void loop()
 			String host = updateDetails.containsKey("host")?updateDetails["host"]:config.postHost.toString();
 			int port = updateDetails.containsKey("port")?updateDetails["port"]:config.postHostPort;
 			String url = updateDetails["url"];
-			DEBUG(DEBUG_IMPORTANT, Serial.printf("Updating from %s:%d %s\n\r", (const char*)host.c_str(),port, (const char*)url.c_str()));
+			debugger.printf(debug::dbImportant, "Updating from %s:%d %s\n\r", (const char*)host.c_str(),port, (const char*)url.c_str());
 			// do it!
 			enum HTTPUpdateResult result=ESPhttpUpdate.update(host,port,url, _MYVERSION);
 
 			switch (result)
 			{
 			case HTTP_UPDATE_FAILED:
-				DEBUG(DEBUG_ERROR, Serial.println("updated FAILED"));
+				debugger.println(debug::dbError, "updated FAILED");
 				break;
 			case HTTP_UPDATE_NO_UPDATES:
-				DEBUG(DEBUG_IMPORTANT, Serial.println("no updates"));
+				debugger.println(debug::dbImportant, "no updates");
 				break;
 			case HTTP_UPDATE_OK:
-				DEBUG(DEBUG_IMPORTANT, Serial.println("update succeeded"));
+				debugger.println(debug::dbImportant, "update succeeded");
 				break;
 			}
 
@@ -799,7 +788,7 @@ void loop()
 	}
 	else
 	{
-		DEBUG(DEBUG_VERBOSE, Serial.println("failed to parse response"));
+		debugger.println(debug::dbVerbose, "failed to parse response");
 	}
 
 
@@ -810,13 +799,13 @@ void loop()
 	if ((unsigned)additionalSleepOffset > (millisToSleep / 2))
 	{
 		millisToSleep += (millisToSleep-additionalSleepOffset);
-		DEBUG(DEBUG_VERBOSE, Serial.printf("Sleeping for %lu + %lu ms\n\r", millisToSleep, (millisToSleep - additionalSleepOffset)));
+		debugger.printf(debug::dbVerbose, "Sleeping for %lu + %lu ms\n\r", millisToSleep, (millisToSleep - additionalSleepOffset));
 
 	}
 	else
 	{
 		millisToSleep -= additionalSleepOffset;
-		DEBUG(DEBUG_VERBOSE,Serial.printf("Sleeping for %lu - %lu ms\n\r", millisToSleep, additionalSleepOffset));
+		debugger.printf(debug::dbVerbose, "Sleeping for %lu - %lu ms\n\r", millisToSleep, additionalSleepOffset);
 	}
 
 
@@ -825,9 +814,8 @@ void loop()
 
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
-	digitalWrite(TRAN_PIN, LOW);
 	// turn power off
-	DEBUG(DEBUG_INFO, Serial.printf("Awake for %lu ms\n\r",millis()-millisAtBoot));
+	debugger.printf(debug::dbInfo, "Awake for %lu ms\n\r",millis()-millisAtBoot);
 	GoToSleep(millisToSleep);
 #else
 	delay(millisToSleep);
@@ -840,56 +828,8 @@ float readLux()
 	return lux.getLux();
 }
 
-#include <vector>
-#include <algorithm>
-
-// from a cold boot the sensor needs ~350ms to be ready to take a reading
-// use the A-D voltage
-float readDistanceCMS_Pulse(int sampleCount)
-{
-	std::vector<float> samples;
-
-	for (; sampleCount; sampleCount--)
-	{
-		delay(100);
-		pinMode(ULTRA_PULSE, INPUT);
-		unsigned timeItTook = pulseIn(ULTRA_PULSE, HIGH);
-		// 147uS/inch
-
-		float inches = timeItTook / 147;
-
-		//pinMode(ULTRA_PULSE, OUTPUT);
-		//digitalWrite(ULTRA_PULSE, LOW);
-		samples.push_back(inches*2.54);
-	}
-
-	std::sort(samples.begin(),samples.end());
-
-	return samples.back();
 
 
-}
-
-
-float readDistanceCMS_Analogue(int samples)
-{
-	if (samples < 1)
-		samples = 1;
-	float analog = 0;
-	for (int each = 0; each < samples; each++)
-	{
-		analog += analogRead(A0);
-		// 49msec for a new read
-		delay(55);
-	}
-	analog /= (float)samples;
-	// long way round
-	//float ana = analogRead(A0);
-	//float anaV = 3.3 * (ana / 1024);
-	//float scale = 3.3 / 512.0;
-	//float theRange = (anaV/scale)*2.54;
-	return (analog / 2.0)*2.54;
-}
 
 
 int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnPayload, int retries)
@@ -900,10 +840,10 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 	String *body = new String();
 	size_t width = blob.printTo(*body);
 
-	DEBUG(DEBUG_VERBOSE, Serial.println("===================="));
-	DEBUG(DEBUG_VERBOSE, Serial.printf("Body - JSON length = %d\n\r", width));
-	DEBUG(DEBUG_VERBOSE, Serial.println(*body));
-	DEBUG(DEBUG_VERBOSE, Serial.println("===================="));
+	debugger.println(debug::dbVerbose, "====================");
+	debugger.printf(debug::dbVerbose, "Body - JSON length = %d\n\r", width);
+	debugger.println(debug::dbVerbose, *body);
+	debugger.println(debug::dbVerbose, "====================");
 	int httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
 	HTTPClient http;
 	
@@ -918,7 +858,7 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 
 		for (int retryAttempt = 0; (retryAttempt < retries) && httpCode == HTTPC_ERROR_CONNECTION_REFUSED; retryAttempt++)
 		{
-			DEBUG(DEBUG_VERBOSE, Serial.println("Posting"));
+			debugger.println(debug::dbVerbose, "Posting");
 			httpCode = http.POST(*body);
 
 			if (httpCode == HTTPC_ERROR_CONNECTION_REFUSED)
@@ -926,14 +866,14 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 #ifdef _TRY_PING
 				if (Ping.ping(host,1))
 				{
-					DEBUG(DEBUG_IMPORTANT, Serial.println("PING success"));
+					debugger.println(debug::dbImportant, "PING success");
 				}
 				else
 				{
-					DEBUG(DEBUG_IMPORTANT, Serial.println("PING FAILED"));
+					debugger.println(debug::dbImportant, "PING FAILED");
 				}
 #endif
-				DEBUG(DEBUG_VERBOSE, Serial.println("Connection refused"));
+				debugger.println(debug::dbVerbose, "Connection refused");
 
 			}
 			else
@@ -943,19 +883,19 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 				if (payloadSize)
 				{
 					returnPayload = http.getString();
-					DEBUG(DEBUG_INFO, Serial.printf("response payloadsize %d\n\r", payloadSize));
-					DEBUG(DEBUG_INFO, Serial.println(returnPayload));
+					debugger.printf(debug::dbInfo, "response payloadsize %d\n\r", payloadSize);
+					debugger.println(debug::dbInfo, returnPayload);
 				}
 			}
 		}
 
-		DEBUG(DEBUG_VERBOSE, Serial.printf("Post result %d\n\r", httpCode));
+		debugger.printf(debug::dbVerbose, "Post result %d\n\r", httpCode);
 
 		http.end();
 	}
 	else
 	{
-		DEBUG(DEBUG_IMPORTANT, Serial.println("http.begin failed"));
+		debugger.println(debug::dbImportant, "http.begin failed");
 		httpCode = HTTPC_ERROR_CONNECTION_REFUSED;
 	}
 	delete body;
@@ -991,7 +931,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 				PrepareDataBlob(root);
 
-				DEBUG(DEBUG_VERBOSE, Serial.println("aggregating stale data"));
+				debugger.println(debug::dbVerbose, "aggregating stale data");
 
 				JsonArray &dataArray = root.createNestedArray("data");
 
@@ -1004,7 +944,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 					DynamicJsonBuffer temp;
 					JsonObject &readData = temp.parse(jsonText);
-					DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer temp size %d\n\r", temp.size()));
+					debugger.printf(debug::dbVerbose, "DynamicJsonBuffer temp size %d\n\r", temp.size());
 
 					if (readData.success())
 					{
@@ -1013,7 +953,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 						if (lastIterSeen > config.iterationSent)
 						{
-							DEBUG(DEBUG_VERBOSE, Serial.printf("%d. (%d) %s\n\r", rowCount+1, jsonText.length(), jsonText.c_str()));
+							debugger.printf(debug::dbVerbose, "%d. (%d) %s\n\r", rowCount+1, jsonText.length(), jsonText.c_str());
 
 							JsonObject &data = dataArray.createNestedObject();
 
@@ -1035,10 +975,10 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 					}
 					else
 					{
-						DEBUG(DEBUG_IMPORTANT, Serial.println("failed to parse stale data row"));
+						debugger.println(debug::dbImportant, "failed to parse stale data row");
 					}
 
-					DEBUG(DEBUG_VERBOSE, Serial.printf("DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size()));
+					debugger.printf(debug::dbVerbose, "DynamicJsonBuffer jsonHTTPsend size %u\n\r", jsonHTTPsend.size());
 
 				}
 
@@ -1057,7 +997,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 					}
 					break;
 				default:
-					DEBUG(DEBUG_VERBOSE, Serial.println("failed, bailing"));
+					debugger.println(debug::dbVerbose, "failed, bailing");
 					abortMore = true;
 					break;
 				}
@@ -1069,7 +1009,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 			if (flagDataFileForDelete)
 			{
 				SD.remove(_JSON_DATA_FILE);
-				DEBUG(DEBUG_INFO, Serial.println("Killing data file"));
+				debugger.println(debug::dbInfo, "Killing data file");
 			}
 
 
@@ -1077,13 +1017,13 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 		}
 		else
 		{
-			DEBUG(DEBUG_IMPORTANT, Serial.println("Could not open data"));
+			debugger.println(debug::dbImportant, "Could not open data");
 			return false;
 		}
 	}
 	else
 	{
-		DEBUG(DEBUG_ERROR, Serial.println("not connected"));
+		debugger.println(debug::dbError, "not connected");
 		return false;
 	}
 

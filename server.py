@@ -2,6 +2,25 @@ from flask import Flask, request, send_from_directory
 from concurrent.futures import ThreadPoolExecutor
 import json
 import signal
+import os
+
+# on a virgin pi
+#
+# apt-get install python3 python3-pip
+# pip3 install flask
+# pip3 install --upgrade google-api-python-client
+# pip3 install oauth2client
+#   clone my pyLibraries 'somewhere' on the pi
+#   go to that clone and run ...
+# python3 setup.py install
+#   create a config directory under this script's dir
+#   copy your client_secrets.json file fomr Google Developer Console
+#     you may have to create a project and add ..
+#     fuson R/W Sheets R/W APIs to your project
+#   run this script - the first time it should notice there's not google credentials and prompt you to create them by giving you an URL
+#   it will ask for access rights, and if you approve, give you a string to paste in
+
+
 
 from bjfGoogle import bjfGoogle, bjfFusionService, bjfSheetsService
 #import bjfGoogle
@@ -16,7 +35,8 @@ def main():
     return "Welcome!"
 
 #pi
-defaultDirectory="/home/pi/tank/"
+#defaultDirectory="/home/pi/tank/"
+defaultDirectory=os.path.dirname(os.path.abspath(__file__))+"/"
 # windows
 #defaultDirectory="c:\\scribble\\"
 

@@ -7,9 +7,7 @@ import os
 # on a virgin pi
 #
 # apt-get install python3 python3-pip
-# pip3 install flask
-# pip3 install --upgrade google-api-python-client
-# pip3 install oauth2client
+# python3 setup.py
 #   clone my pyLibraries 'somewhere' on the pi
 #   go to that clone and run ...
 # python3 setup.py install

@@ -55,7 +55,7 @@
 #define _AP_SLEEP_TIMEOUT_FOREVER	-1
 #endif
 
-#define _SCAN_I2C
+//#define _SCAN_I2C
 
 //#define _TRY_PING
 #include <ESP8266Ping.h>
@@ -456,7 +456,7 @@ bool readConfig()
 		config.samplePeriodMins = root["samplePeriodMin"];
 
 #ifndef _SLEEP_PERCHANCE_TO_DREAM
-	config.samplePeriodMins = 10;
+	config.samplePeriodMins = 1;
 #endif
 
 	config.iterationSent=root["lastIterSent"];
@@ -730,7 +730,7 @@ void loop()
 	{
 		if (serverInfo.containsKey("reset"))
 		{
-			debugger.println(debug::dbInfo, "response includes reset key");
+			debugger.printf(debug::dbInfo, "response includes reset key ...");
 			if (serverInfo["reset"] == true)
 			{
 				debugger.println(debug::dbImportant, "reset is true");
@@ -741,6 +741,10 @@ void loop()
 				{
 					ESP.restart();
 				}
+			}
+			else
+			{
+				debugger.println(debug::dbImportant, "reset is FALSE");
 			}
 		}
 		

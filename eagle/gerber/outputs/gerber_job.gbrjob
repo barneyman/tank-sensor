@@ -1,0 +1,13 @@
+G04 Gerber job file.*
+%TF.FileFunction,JobInfo*%
+%TF.GenerationSoftware,Autodesk,EAGLE,9.1.0*%
+%TF.CreationDate,2018-07-07T09:38:13Z*%
+%TF.Part,Single*%
+%MOMM*%
+%TJ.B_Owner,b f <barnaby.james.flint@gmail.com>*%
+%TJ.B_ID,espsolr*%
+%TJ.B_LayerNum,2*%
+%TJ.B_Thickness,1.570000*%
+%TJ.B_Size_X,59.360000*%
+%TJ.B_Size_Y,44.440000*%
+M02*

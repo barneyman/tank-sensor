@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import signal
 import os
+import sys
 
 # on a virgin pi
 #
@@ -35,6 +36,7 @@ def main():
 #pi
 #defaultDirectory="/home/pi/tank/"
 defaultDirectory=os.path.dirname(os.path.abspath(__file__))+"/"
+print ("default dir is ",defaultDirectory)
 # windows
 #defaultDirectory="c:\\scribble\\"
 
@@ -44,9 +46,12 @@ FlaskPort=5000
 
 @app.route('/upgrades/<path:filename>')
 def send_js(filename):
-	print("sending "+filename)
+	print("sending update "+filename)
 	return send_from_directory(defaultDirectory+'upgrades', filename)
 
+
+# only 1 worker, so we get it off the http thread, but don't then create mutex problems in our own code
+singleThreadWorker=ThreadPoolExecutor(max_workers=1)
 
 
 @app.route("/data", methods=['GET', 'POST'])
@@ -68,7 +73,7 @@ def data():
 			print (request.data)
 			return "error"
 
-		executor.submit(ProcessJSON, request.json)
+		singleThreadWorker.submit(ProcessJSON, request.json)
 
 		try:
 			# create a json blob to send back
@@ -114,15 +119,24 @@ def sigterm_handler(_signo, _stack_frame):
 	sys.exit(0)
 
 
+def addFailedRow(tableName, rowData):
+	addition={ "table":tableName,"data":rowData}
+	failedRowValues.append(addition)
+	# debug
+	# print ("Added ", addition)
+	# json.dump(failedRowValues, open(defaultDirectory+"config/staleDataTemp.json",'w'))
+
+
+
 def writeStaleData():	
 	if len(failedRowValues)>0:
 		print("scribbling the stales to file")
 		json.dump(failedRowValues, open(defaultDirectory+"config/staleData.json",'w'))
 
-def PublishJSON(maxRows):	
+def PublishCachedJSON(maxRows):	
 	# the [:] means take a copy of thing to  iterate with - i like python
 	archiveRowCount=0
-	print("archived items ",len(failedRowValues));
+	print("stale item count ",len(failedRowValues), " attempting ...");
 	# the [:] means take a copy of thing to  iterate with - i like python
 	
 	for row in failedRowValues[:]:
@@ -132,36 +146,41 @@ def PublishJSON(maxRows):
 		if archiveRowCount>maxRows:
 			break
 		try:
-			print("retrying row ",row)
+			#debug
+			#print("retrying row ",row)
 			#raise ValueError('faking a fusion error - collect a few of these.')
+
+
 			theTable=getOrCreateTable(row['table'])		
 			fusion.InsertRowData(theTable,row['data'])
-			# workled, remove the the ORIGINAL list
+			# worked, remove the the ORIGINAL list
 			failedRowValues.remove(row)
 		except Exception as e:
 			print("fusion retry failed ",e)
 			# we need to bail on fail or we risk breaking sequence
-			bailNow=true
+			bailNow=True
 		try:
 			if bailNow==False:
-				sheetsService.AppendSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', row, 'HISTORY_DATA')
+				sheetsService.AppendSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', row['data'], 'HISTORY_DATA')
 		except Exception as e:
-			print("sheets retry failed - don't care",e)
+			print("sheets retry failed - ",e)
 			
 		if bailNow == True:
 			break
 	
 	
 def ProcessJSON(jsonData):
+	#debug
 	#print (jsonData)
 	#print("=======")
 	#print (jsonData["data"])
 	#print("=======")
+
 	# work out how many times we have to do this
 	try:
 
 		# push any stale values
-		PublishJSON(2)
+		PublishCachedJSON(2)
 
 		rowValues=[]
 
@@ -187,18 +206,21 @@ def ProcessJSON(jsonData):
 		# add to history
 		# DEBUG
 		if len(rowValues)>0 :
+			# fusion is the important one
+			tableName=jsonData["host"]+"_tempPressure";
 
 			# to keep sequential order, if we have anything stale, add to the back of it
 			if len(failedRowValues) > 0:
-				failedRowValues.append(rowValues)
-				print ("force queued row")
+				addFailedRow(tableName,rowValues)
 			else:
 				try:
-					# fusion is the important one
-					tableName=jsonData["host"]+"_tempPressure";
 					theTable=getOrCreateTable(tableName)		
+					#debug
 					#raise ValueError('faking a fusion error - collect a few of these.')
+
+
 					fusion.InsertRowData(theTable,rowValues)
+					# then try to add to the spreadsheet
 					try:
 						sheetsService.AppendSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', rowValues, 'HISTORY_DATA')
 					except Exception as e:
@@ -206,8 +228,7 @@ def ProcessJSON(jsonData):
 				except Exception as e:
 					print("fusion exception ",e)
 					if len(failedRowValues) < 1000:
-						failedRowValues.append({ "table":tableName,"data":rowValues})
-						print ("queued row ")
+						addFailedRow(tableName,rowValues)
 
 
 		# deepcopy
@@ -217,7 +238,7 @@ def ProcessJSON(jsonData):
 		rowValues=[latestRowData]
 		latestRowData.append(utcNow.strftime("%Y-%m-%d %H:%M:%S"))
 		sheetsService.UpdateSheetRange('1hVkEaao2yQ6g680cfmSKf6PiZUFidZwlI_8EWsFN7s0', rowValues,'LATEST_DATA')
-		print( "processed")
+		print( "synch process finished")
 	except Exception as e:
 		print ("Async Exception occurred ",e)
 		
@@ -234,32 +255,36 @@ def getOrCreateTable(tableName):
 
 if __name__ == "__main__":
 	thisG=bjfGoogle()
-	thisG.Authenticate(defaultDirectory+"config/client_secret.json",defaultDirectory+"config/credentialStore.credentials", "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/fusiontables")
-	# create a fusion table
-	fusion=bjfFusionService(thisG)
-	sheetsService=bjfSheetsService(thisG)
-	# see if our table is there
+	if thisG.Authenticate(defaultDirectory+"config/client_secret.json",defaultDirectory+"config/credentialStore.credentials", "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/fusiontables"):
 
-	#tableName="tempPressure"
-	#tpTable=fusion.GetTableByName(tableName)
-	
-	#signal.signal(signal.SIGTERM, sigterm_handler)
-	#signal.signal(signal.SIGINT, sigterm_handler)
-	
-	print ("reading stale data "),
-	try:
-		failedRowValues = json.load(open(defaultDirectory+"config/staleData.json"))
-		print(len(failedRowValues))
-		PublishJSON(20)
-	except:
-		failedRowValues=[]
-	
-	if True: #tpTable!=None:
-		print("running")
-		executor = ThreadPoolExecutor(2)
-		app.run(host="0.0.0.0", port=FlaskPort)
+		# create a fusion table
+		fusion=bjfFusionService(thisG)
+		sheetsService=bjfSheetsService(thisG)
+		# see if our table is there
 
-		writeStaleData()
+		#tableName="tempPressure"
+		#tpTable=fusion.GetTableByName(tableName)
+	
+		signal.signal(signal.SIGTERM, sigterm_handler)
+		signal.signal(signal.SIGINT, sigterm_handler)
+	
+		print ("reading stale data "),
+		try:
+			failedRowValues = json.load(open(defaultDirectory+"config/staleData.json"))
+			print(len(failedRowValues))
+			PublishCachedJSON(20)
+			# and delete the file
+			os.remove(defaultDirectory+"config/staleData.json")
+		except:
+			failedRowValues=[]
+	
+		if True: #tpTable!=None:
+			print("running")
+			app.run(host="0.0.0.0", port=FlaskPort)
+			writeStaleData()
+
+	else:
+		print("failed to authenticate")
 
 
 

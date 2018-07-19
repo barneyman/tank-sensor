@@ -290,3 +290,5 @@ __vm/
 *.?#?
 eagle/espsolr.pro
 config/
+upgrades/
+TankSensor.ino.d1_mini.bin

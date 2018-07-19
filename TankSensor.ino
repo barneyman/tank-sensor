@@ -12,7 +12,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.2"
+#define _MYVERSION	"tank_1.6"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -56,8 +56,14 @@
 #endif
 
 //#define _SCAN_I2C
-
 //#define _TRY_PING
+//#define _USE_OLED
+
+#ifdef _USE_OLED
+#include <Tiny4kOLED.h>
+#endif
+
+
 #include <ESP8266Ping.h>
 
 #include <Wire.h>
@@ -65,7 +71,7 @@
 
 // my libs
 #include <debugLogger.h>
-SerialDebug debugger(debug::dbVerbose);
+SerialDebug debugger(debug::dbImportant);
 
 #include <myWifi.h>
 myWifiClass wifiInstance("wemos_", &debugger);
@@ -132,12 +138,13 @@ unsigned long lastSeenTraffic = 0;
 // the setup function runs once when you press reset or power the board
 void setup() {
 
-
-
 	debugger.begin(9600);
 	///Serial.setTimeout(2000);
 
-	debugger.printf(debug::dbImportant, "Awake. version %s\n\r",_MYVERSION);
+	pinMode(LED_BUILTIN, OUTPUT);
+	debugger.printf(debug::dbImportant, "\n\rAwake. version %s\n\r",_MYVERSION);
+	// builtin is wired wrong :/
+	digitalWrite(LED_BUILTIN, LOW);
 
 
 	// 
@@ -178,7 +185,6 @@ void setup() {
 		wifiInstance.ConnectWifi(myWifiClass::modeAP, config.wifi);
 
 		// begin the servers
-		debugger.println(debug::dbVerbose, "serving static pages");
 
 		wifiInstance.server.on("/", HTTP_GET, []() {
 
@@ -371,6 +377,7 @@ void setup() {
 
 
 		// serve up everthing in SPIFFS
+		debugger.println(debug::dbVerbose, "serving static pages");
 		SPIFFS.openDir("/");
 
 		fs::Dir dir = SPIFFS.openDir("/");
@@ -410,13 +417,14 @@ void setup() {
 	switch (bme.chipModel())
 	{
 	case BME280::ChipModel_BME280:
-		Serial.println("Found BME280 sensor! Success.");
+		debugger.println(debug::dbInfo,"Found BME280 sensor! Success.");
 		break;
 	case BME280::ChipModel_BMP280:
-		Serial.println("Found BMP280 sensor! No Humidity available.");
+		debugger.println(debug::dbInfo,"Found BMP280 sensor! No Humidity available.");
 		break;
 	default:
-		Serial.println("Found UNKNOWN sensor! Error!");
+		debugger.println(debug::dbError, "Found UNKNOWN sensor! Error!");
+		break;
 	}
 
 	lastSeenTraffic = millis();
@@ -525,7 +533,7 @@ bool writeConfig()
 
 bool appendData(JsonObject &data)
 {
-	debugger.println(debug::dbVerbose, "appending data");
+	debugger.printf(debug::dbVerbose, "appending data :");
 
 	File dataFile = SD.open(_JSON_DATA_FILE, FILE_WRITE | O_APPEND);
 	if (!dataFile)
@@ -546,7 +554,7 @@ bool appendData(JsonObject &data)
 	}
 	else
 	{
-		debugger.println(debug::dbVerbose, "skipping addition, hostory too big");
+		debugger.println(debug::dbVerbose, "skipping addition, history too big");
 	}
 
 	return true;
@@ -620,7 +628,7 @@ void loop()
 
 		if (millis() - lastSeenTraffic > sleepTimeOut)
 		{
-			debugger.printf(debug::dbImportant, "%s deadline exceeded - battery saving - sleeping forerver, sleeping %lu ms\n\r",reason.c_str(),sleepTime);
+			debugger.printf(debug::dbImportant, "%s deadline exceeded - battery saving - sleeping %lu ms\n\r",reason.c_str(),sleepTime);
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
 			GoToSleep(sleepTime);
 #else
@@ -673,6 +681,9 @@ void loop()
 		// then deal with the data file, if we are connected
 		if ((WiFi.status() == WL_CONNECTED))
 		{
+			// { host: intervalS: current: version: 
+			//		data: [ {iter: dist: temp: ... lipo: } ] 
+			//}
 			SendCachedData(config.postHost, config.postHostPort, returnPayload);
 		}
 
@@ -680,6 +691,9 @@ void loop()
 	else
 	{
 		// try to send this blob
+		// { host: intervalS: current: version: 
+		//		data: [{ iter: distCM ... lipo }]
+		// }
 		jsonHTTPsend.clear();
 		JsonObject &root = jsonHTTPsend.createObject();
 
@@ -739,12 +753,13 @@ void loop()
 				// reboot immediately if we're not going to uograde
 				if (!serverInfo.containsKey("upgrade"))
 				{
+					// arooga!! this call will fail to boot immediately after being programmed - it needs a manual reboot in there first
 					ESP.restart();
 				}
 			}
 			else
 			{
-				debugger.println(debug::dbImportant, "reset is FALSE");
+				debugger.println(debug::dbInfo, "reset is FALSE");
 			}
 		}
 		
@@ -768,6 +783,7 @@ void loop()
 				debugger.println(debug::dbImportant, "no updates");
 				break;
 			case HTTP_UPDATE_OK:
+				// shouldn't see this - a successful upgrade reboots automatically
 				debugger.println(debug::dbImportant, "update succeeded");
 				break;
 			}
@@ -816,10 +832,11 @@ void loop()
 
 
 
+	digitalWrite(LED_BUILTIN, HIGH);
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
 	// turn power off
-	debugger.printf(debug::dbInfo, "Awake for %lu ms\n\r",millis()-millisAtBoot);
+	debugger.printf(debug::dbImportant, "Awake for %lu ms\n\r",millis()-millisAtBoot);
 	GoToSleep(millisToSleep);
 #else
 	delay(millisToSleep);
@@ -933,13 +950,18 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 				jsonHTTPsend.clear();
 				JsonObject &root = jsonHTTPsend.createObject();
 
+				// { host: intervalS: current: version: 
+				//		data: [ {iter: dist: temp: ... lipo: } ] 
+				//}
 				PrepareDataBlob(root);
+
 
 				debugger.println(debug::dbVerbose, "aggregating stale data");
 
 				JsonArray &dataArray = root.createNestedArray("data");
 
-#define _MAX_ROW_COUNT	5
+// how many rows to send in a latent blob
+#define _MAX_ROW_COUNT	12
 
 				for (int rowCount = 0; (rowCount < _MAX_ROW_COUNT) && dataFile.available(); )
 				{

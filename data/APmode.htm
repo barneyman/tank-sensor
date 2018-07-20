@@ -26,7 +26,7 @@
                 password
             </td>
             <td>
-                <input name="pwd" size="15" type="password" id="pwd" />
+                <input name="pwd" size="15" type="text" id="pwd"/>
             </td>
         </tr>
         <tr>
@@ -43,8 +43,8 @@
                 IP Address<br />Gateway<br />Netmask<br />
             </td>
             <td>
-                <input type="text" id="ip"/><br />
-                <input type="text" id="gateway"/><br />
+                <input type="text" id="ip" /><br />
+                <input type="text" id="gateway" /><br />
                 <input type="text" id="netmask" value="255.255.255.0"><br />
             </td>
         </tr>
@@ -61,9 +61,9 @@
             <td><input type="number" id="period" value="15"/></td>
         </tr>
     </table>        
-    <button id="rescan" onclick="OnLoad()" disabled>Rescan</button>
-    <button id="join" onclick="JoinWifi()" disabled>Join WiFi</button>
-
+    <button id="rescan" onclick="OnLoad()" disabled hidden>Rescan</button>
+    <button id="join" onclick="JoinWifi()" disabled hidden>Join WiFi</button>
+    <div id="error" class="error"></div>
 
     <script src="common.js"></script>
 
@@ -123,6 +123,9 @@
                     document.getElementById("rescan").disabled = false;
                     document.getElementById("join").disabled = false;
 
+                    document.getElementById("rescan").hidden = false;
+                    document.getElementById("join").hidden = false;
+
                 }).catch(function (error) {
                     alert(error.message)
                     wifis.innerText = "Error"
@@ -167,21 +170,38 @@
 
                 let url = base + '/json/wifi'
 
-                var xhr = new XMLHttpRequest();
-                
-                xhr.open("POST", url, true);
-                xhr.setRequestHeader("Content-type", "text/plain");
+                fetch(url, {
+                    method: 'post',
+                    headers: {
+                        "Content-type": "text/plain"
+                    },
+                    body: JSON.stringify(jsonData)
+                })
+                .then(function (response) {
+                    if (response.ok)
+                        return response.json();
+                    throw new Error('network err')
+                })
+                  .then(function (data) {
+                      
+                      // check the result
+                      if (data["result"])
+                      {
+                          // woo hoo - success - reload - we'll get sent a different page
+                          window.location.reload(true)
+                          window.scrollTo(0, 0);
+                      }
+                      else
+                      {
+                          // failed - complain!
+                          document.getElementById('error').innerHTML="failed to connect to AP"
+                      }
 
-                xhr.onloadend = function () {
-                    // done
-                    // we should delay for a couple of seconds, then try to 
-                    // go to the .local domain again
-                    window.scrollTo(0, 0);
-                    window.location.reload(true)
-                };
 
-                xhr.send(JSON.stringify(jsonData));
-
+                  })
+                  .catch(function (error) {
+                      console.log('Request failed', error);
+                  });
 
             }
             else

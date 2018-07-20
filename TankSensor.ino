@@ -42,7 +42,7 @@
 
 #ifdef _SLEEP_PERCHANCE_TO_DREAM
 // default sample period - 15 mins
-#define _SAMPLE_INTERVAL_M	(15)
+#define _SAMPLE_INTERVAL_M	(60)
 #define _AP_SLEEP_TIMEOUT			_AP_SLEEP_AFTER_M(2)
 #define _AP_SLEEP_TIMEOUT_STAAP		_AP_SLEEP_AFTER_S(20)
 #define _AP_SLEEP_TIMEOUT_AP		_AP_SLEEP_TIMEOUT
@@ -71,7 +71,7 @@
 
 // my libs
 #include <debugLogger.h>
-SerialDebug debugger(debug::dbImportant);
+SerialDebug debugger;// (debug::dbImportant);
 
 #include <myWifi.h>
 myWifiClass wifiInstance("wemos_", &debugger);
@@ -138,7 +138,7 @@ unsigned long lastSeenTraffic = 0;
 // the setup function runs once when you press reset or power the board
 void setup() {
 
-	debugger.begin(9600);
+	debugger.begin(57600);
 	///Serial.setTimeout(2000);
 
 	pinMode(LED_BUILTIN, OUTPUT);
@@ -309,34 +309,42 @@ void setup() {
 			debugger.println(debug::dbInfo, "json wifi posted");
 			debugger.println(debug::dbInfo, wifiInstance.server.arg("plain"));
 
+			{
+				DynamicJsonBuffer jsonBuffer;
+				// 'plain' is the secret source to get to the body
+				JsonObject& root = jsonBuffer.parseObject(wifiInstance.server.arg("plain"));
+
+				String ssid = root["ssid"];
+				String pwd = root["pwd"];
+
+				// sanity check these values
+
+				config.wifi.ssid = ssid;
+				config.wifi.password = pwd;
+
+				// dhcp or static?
+				if (root["dhcp"] == 1)
+				{
+					config.wifi.dhcp = true;
+				}
+				else
+				{
+					config.wifi.dhcp = false;
+					config.wifi.ip.fromString((const char*)root["ip"]);
+					config.wifi.gateway.fromString((const char*)root["gateway"]);
+					config.wifi.netmask.fromString((const char*)root["netmask"]);
+				}
+
+				config.postHost.fromString((const char*)root["loghost"]);
+				config.postHostPort = root["loghostport"];
+				config.samplePeriodMins = root["loghostperiod"];
+			}
+
 			DynamicJsonBuffer jsonBuffer;
-			// 'plain' is the secret source to get to the body
-			JsonObject& root = jsonBuffer.parseObject(wifiInstance.server.arg("plain"));
 
-			String ssid = root["ssid"];
-			String pwd = root["pwd"];
+			JsonObject &root = jsonBuffer.createObject();
+			root["name"] = wifiInstance.m_hostName.c_str();
 
-			// sanity check these values
-
-			config.wifi.ssid = ssid;
-			config.wifi.password = pwd;
-
-			// dhcp or static?
-			if (root["dhcp"] == 1)
-			{
-				config.wifi.dhcp = true;
-			}
-			else
-			{
-				config.wifi.dhcp = false;
-				config.wifi.ip.fromString((const char*)root["ip"]);
-				config.wifi.gateway.fromString((const char*)root["gateway"]);
-				config.wifi.netmask.fromString((const char*)root["netmask"]);
-			}
-
-			config.postHost.fromString((const char*)root["loghost"]);
-			config.postHostPort = root["loghostport"];
-			config.samplePeriodMins = root["loghostperiod"];
 
 			// force attempt
 			// if we fail we fall back to AP
@@ -359,18 +367,22 @@ void setup() {
 #else
 				config.wifi.configured = true;
 #endif
+				root["result"] = true;
 			}
 			else
 			{
 				debugger.println(debug::dbImportant, "Speculative join failed");
 				config.wifi.configured = false;
+				root["result"] = false;
 			}
 
 			// and update json
 			writeConfig();
-
+			String jsonText;
+			root.printTo(jsonText);
+			debugger.println(debug::dbInfo, jsonText);
 			wifiInstance.server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-			wifiInstance.server.send(200, "text/json", "<html/>");
+			wifiInstance.server.send(200, "text/json", jsonText);
 
 		});
 

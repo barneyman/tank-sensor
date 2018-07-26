@@ -35,7 +35,7 @@ def main():
 
 #pi
 #defaultDirectory="/home/pi/tank/"
-defaultDirectory=os.path.dirname(os.path.abspath(__file__))+"/"
+defaultDirectory=os.path.dirname(os.path.abspath(__file__))+"/../"
 print ("default dir is ",defaultDirectory)
 # windows
 #defaultDirectory="c:\\scribble\\"

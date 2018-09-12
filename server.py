@@ -171,10 +171,10 @@ def PublishCachedJSON(maxRows):
 	
 def ProcessJSON(jsonData):
 	#debug
-	#print (jsonData)
-	#print("=======")
-	#print (jsonData["data"])
-	#print("=======")
+	print (jsonData)
+	print("=======")
+	print (jsonData["data"])
+	print("=======")
 
 	# work out how many times we have to do this
 	try:

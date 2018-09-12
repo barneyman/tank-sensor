@@ -198,6 +198,17 @@ def ProcessJSON(jsonData):
 
 			lastRowValues=[utcForIteration.strftime("%Y-%m-%d %H:%M:%S"),localForIteration.strftime("%Y-%m-%d %H:%M:%S"), reading["iter"], reading["tempC"],reading["pressMB"],reading["humid%"], reading["distCM"], reading["lux"], reading["lipo"] ]
 
+			lastRowValuesJSON={	"utc":lastRowValues[0],
+								"local":lastRowValues[1], 
+								"iteration":lastRowValues[2],
+								"outsideTemp": lastRowValues[3],
+								"outsidePressure":lastRowValues[4],
+								"humidity":lastRowValues[5],
+								"distance":lastRowValues[6],
+								"outsideLux":lastRowValues[7],
+								"lipoVoltage":lastRowValues[8]
+								}
+
 			# DEBUG - seive to minutes only
 			#if reading["iter"] % 6 == 0:
 			rowValues.append(lastRowValues)
@@ -232,7 +243,7 @@ def ProcessJSON(jsonData):
 
 
 		# deepcopy
-		json.dump(lastRowValues, open(defaultDirectory+"config/lastSeenData.json",'w'))
+		json.dump(lastRowValuesJSON, open(defaultDirectory+"config/lastSeenData.json",'w'))
 		#  deep copy
 		latestRowData = [i for i in lastRowValues]
 		rowValues=[latestRowData]

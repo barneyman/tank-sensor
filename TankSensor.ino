@@ -12,7 +12,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_1.6"
+#define _MYVERSION	"tank_2.03"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -33,6 +33,8 @@
 #include <FS.h>
 
 // enable this define for deepsleep (RST and D0 must be connected)
+// during usb debugging this needs to be undefined or the device will 
+// sleep and never come back
 #define _SLEEP_PERCHANCE_TO_DREAM
 
 #define _AP_SLEEP_AFTER_MS(a)	a
@@ -74,7 +76,7 @@
 SerialDebug debugger;// (debug::dbImportant);
 
 #include <myWifi.h>
-myWifiClass wifiInstance("wemos_", &debugger);
+myWifiClass wifiInstance("wemos_", &debugger, "tank");
 
 #include <atUltra.h>
 
@@ -476,7 +478,9 @@ bool readConfig()
 		config.samplePeriodMins = root["samplePeriodMin"];
 
 #ifndef _SLEEP_PERCHANCE_TO_DREAM
-	config.samplePeriodMins = 1;
+	config.samplePeriodMins = 3;
+#else
+	config.samplePeriodMins = 15;
 #endif
 
 	config.iterationSent=root["lastIterSent"];
@@ -598,10 +602,12 @@ void PrepareDataBlob(JsonObject &root)
 // i added 110k to protect against lipo charging blowing the analog
 // so, working backwards ... max voltage is 4.3v
 // 
+// BUT THEN!!! I fucked the board up and had to hotwire, losing a resistor
+# define _ANA_MAX_VOLTAGE	(4.2)
 float readLIPOvoltage()
 {
 	int ana = analogRead(A0);
-	float voltage = ((float)ana / 1023.0)*4.3;
+	float voltage = ((float)ana / 1023.0)*_ANA_MAX_VOLTAGE;
 
 	return voltage;
 }
@@ -611,6 +617,22 @@ DynamicJsonBuffer jsonHTTPsend;
 
 
 #define _PY_PORT	5000
+
+#define _SAMPLE_BASED_ON_LIPO
+
+#ifdef _SAMPLE_BASED_ON_LIPO
+
+struct { float lipo; unsigned delay; } samplePeriods[] = {
+	{ 4.15, 1 },
+	{ 4.10, 2 },
+	{ 4.07, 5 },
+	{ 4.05, 10 },
+	{ 4.02, 15 },
+	{ 3.90, 30 },
+	{ 0, 60 }
+};
+#endif
+
 
 // the loop function runs over and over again until power down or reset
 void loop() 
@@ -676,7 +698,28 @@ void loop()
 	dataNow["humid%"] = humidity;
 	dataNow["pressMB"] = pressure;
 	dataNow["lux"] = readLux();
-	dataNow["lipo"] = readLIPOvoltage();
+
+	float voltOnLipo = readLIPOvoltage();
+	dataNow["lipo"] = voltOnLipo;
+
+#ifdef _SAMPLE_BASED_ON_LIPO
+
+	config.samplePeriodMins = 60;
+
+	for (unsigned each = 0; each < sizeof(samplePeriods) / sizeof(samplePeriods[0]); each++)
+	{
+		if (voltOnLipo > samplePeriods[each].lipo)
+		{
+			config.samplePeriodMins = samplePeriods[each].delay;
+			break;
+		}
+	}
+
+	debugger.printf(debug::dbInfo, "With v%f chose to sleep for %d\n\r", voltOnLipo, config.samplePeriodMins);
+
+#endif
+
+	dataNow["sleepMins"] = config.samplePeriodMins;
 
 	debugger.println(debug::dbVerbose, "new data");
 	debugger.printf(debug::dbVerbose, "DynamicJsonBuffer appenddata size %d\n\r", jsonBuffer.size());
@@ -713,7 +756,7 @@ void loop()
 
 		JsonArray &dataArray = root.createNestedArray("data");
 
-		unsigned long a;
+		unsigned long a,h;
 		float b, c, d, e, f, g;
 
 		JsonObject &data = dataArray.createNestedObject();
@@ -725,7 +768,7 @@ void loop()
 		data["pressMB"] = e = dataNow["pressMB"];
 		data["lux"] = f = dataNow["lux"];
 		data["lipo"] = g = dataNow["lipo"];
-
+		data["sleepMins"] = h = dataNow["sleepMins"];
 
 		int httpCode = SendToHost(config.postHost, config.postHostPort, root, returnPayload,0);
 
@@ -807,7 +850,6 @@ void loop()
 		{
 			int currentMinutes = serverInfo["minutes"];
 			unsigned minsToSkip = (currentMinutes%config.samplePeriodMins);
-
 			additionalSleepOffset = (minsToSkip *60)*1000;
 		}
 		if (serverInfo.containsKey("seconds"))
@@ -824,20 +866,22 @@ void loop()
 	}
 
 
-	unsigned long millisAtEnd = millis();
 
+	unsigned long millisAtEnd = millis();
+	// work out how long we should sleep 
 	unsigned long millisToSleep = (config.samplePeriodMins *60 * 1000) - (millisAtEnd - millisAtStart);
 
+	// then use the fix up we worked out from server time
 	if ((unsigned)additionalSleepOffset > (millisToSleep / 2))
 	{
 		millisToSleep += (millisToSleep-additionalSleepOffset);
-		debugger.printf(debug::dbVerbose, "Sleeping for %lu + %lu ms\n\r", millisToSleep, (millisToSleep - additionalSleepOffset));
+		debugger.printf(debug::dbVerbose, "Sleeping for %lu ms + %lu ms\n\r", millisToSleep, (millisToSleep - additionalSleepOffset));
 
 	}
 	else
 	{
 		millisToSleep -= additionalSleepOffset;
-		debugger.printf(debug::dbVerbose, "Sleeping for %lu - %lu ms\n\r", millisToSleep, additionalSleepOffset);
+		debugger.printf(debug::dbVerbose, "Sleeping for %lu ms - %lu ms\n\r", millisToSleep, additionalSleepOffset);
 	}
 
 
@@ -997,7 +1041,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 
 							// cloning between objects is 'hard' so go via intermediate var
 
-							unsigned long a;
+							unsigned long a, h;
 							float b, c, d, e, f, g;
 
 							data["iter"] = a = readData["iter"];
@@ -1007,6 +1051,7 @@ bool SendCachedData(IPAddress &pyHost, unsigned port, String &returnPayload)
 							data["pressMB"] = e = readData["pressMB"];
 							data["lux"] = f = readData["lux"];
 							data["lipo"] = g = readData["lipo"];
+							data["sleepMins"] = h = readData["sleepMins"];
 
 							rowCount++;
 						}

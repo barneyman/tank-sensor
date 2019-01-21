@@ -12,7 +12,7 @@
 
 #include <ArduinoJson.h>
 
-#define _MYVERSION	"tank_2.03"
+#define _MYVERSION	"tank_2.04"
 
 #define _JSON_CONFIG_FILE "CONFIG.JSN"
 
@@ -35,7 +35,7 @@
 // enable this define for deepsleep (RST and D0 must be connected)
 // during usb debugging this needs to be undefined or the device will 
 // sleep and never come back
-#define _SLEEP_PERCHANCE_TO_DREAM
+//#define _SLEEP_PERCHANCE_TO_DREAM
 
 #define _AP_SLEEP_AFTER_MS(a)	a
 #define _AP_SLEEP_AFTER_S(a)	_AP_SLEEP_AFTER_MS(1000*a)
@@ -73,7 +73,7 @@
 
 // my libs
 #include <debugLogger.h>
-SerialDebug debugger;// (debug::dbImportant);
+SerialDebug debugger(debug::dbVerbose);// (debug::dbImportant);
 
 #include <myWifi.h>
 myWifiClass wifiInstance("wemos_", &debugger, "tank");
@@ -140,11 +140,15 @@ unsigned long lastSeenTraffic = 0;
 // the setup function runs once when you press reset or power the board
 void setup() {
 
-	debugger.begin(57600);
+	debugger.begin(9600);
 	///Serial.setTimeout(2000);
+	debugger.printf(debug::dbImportant, "\n\rAwake. version %s\n\r", _MYVERSION);
+
+#ifndef	_SLEEP_PERCHANCE_TO_DREAM
+	delay(2000);
+#endif
 
 	pinMode(LED_BUILTIN, OUTPUT);
-	debugger.printf(debug::dbImportant, "\n\rAwake. version %s\n\r",_MYVERSION);
 	// builtin is wired wrong :/
 	digitalWrite(LED_BUILTIN, LOW);
 
@@ -392,7 +396,7 @@ void setup() {
 
 		// serve up everthing in SPIFFS
 		debugger.println(debug::dbVerbose, "serving static pages");
-		SPIFFS.openDir("/");
+		//SPIFFS.openDir("/");
 
 		fs::Dir dir = SPIFFS.openDir("/");
 		while (dir.next()) {
@@ -400,10 +404,12 @@ void setup() {
 
 			// cache it for an hour
 			wifiInstance.server.serveStatic(file.c_str(), SPIFFS, file.c_str(), "Cache-Control: public, max-age=60");
-
 			debugger.printf(debug::dbVerbose, "Serving %s\n\r", file.c_str());
 
 		}
+
+		debugger.println(debug::dbVerbose, "serving static pages END");
+
 	}
 	else
 	{ 
@@ -623,11 +629,12 @@ DynamicJsonBuffer jsonHTTPsend;
 #ifdef _SAMPLE_BASED_ON_LIPO
 
 struct { float lipo; unsigned delay; } samplePeriods[] = {
-	{ 4.15, 1 },
-	{ 4.10, 2 },
-	{ 4.07, 5 },
-	{ 4.05, 10 },
-	{ 4.02, 15 },
+	//{ 4.15, 1 },
+	//{ 4.10, 2 },
+	//{ 4.07, 5 },
+	//{ 4.05, 10 },
+	//{ 4.02, 15 },
+	{ 4.0, 5 },
 	{ 3.90, 30 },
 	{ 0, 60 }
 };
@@ -657,6 +664,14 @@ void loop()
 			sleepTimeOut = _AP_SLEEP_TIMEOUT_STAAP;
 			sleepTime = _AP_SLEEP_AFTER_S(20);
 			reason="AP_STA Mode";
+			break;
+		// not worried about - just here for the preparser
+		case myWifiClass::modeOff:
+		case myWifiClass::modeSTA:
+		case myWifiClass::modeSTA_unjoined:
+		case myWifiClass::modeSTAspeculative:
+		case myWifiClass::modeCold:
+		case myWifiClass::modeUnknown:
 			break;
 		}
 
@@ -827,7 +842,7 @@ void loop()
 			String url = updateDetails["url"];
 			debugger.printf(debug::dbImportant, "Updating from %s:%d %s\n\r", (const char*)host.c_str(),port, (const char*)url.c_str());
 			// do it!
-			enum HTTPUpdateResult result=ESPhttpUpdate.update(host,port,url, _MYVERSION);
+			enum HTTPUpdateResult result=ESPhttpUpdate.update(wifiInstance.m_wificlient, host,port,url, _MYVERSION);
 
 			switch (result)
 			{
@@ -928,7 +943,7 @@ int SendToHost(IPAddress &host, unsigned port, JsonObject &blob, String &returnP
 	http.setTimeout(10*1000);
 
 
-	if (http.begin(host.toString().c_str(), port, "/data"))
+	if (http.begin(wifiInstance.m_wificlient, host.toString().c_str(), port, "/data"))
 	{
 
 		http.addHeader("Content-Type", "application/json");

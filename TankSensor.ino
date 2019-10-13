@@ -35,14 +35,14 @@
 // enable this define for deepsleep (RST and D0 must be connected)
 // during usb debugging this needs to be undefined or the device will 
 // sleep and never come back
-//#define _SLEEP_PERCHANCE_TO_DREAM
+//#define _USE_DEEP_SLEEP
 
 #define _AP_SLEEP_AFTER_MS(a)	a
 #define _AP_SLEEP_AFTER_S(a)	_AP_SLEEP_AFTER_MS(1000*a)
 #define _AP_SLEEP_AFTER_M(a)	_AP_SLEEP_AFTER_S(60*a)
 #define _AP_SLEEP_AFTER_H(a)	_AP_SLEEP_AFTER_M(60*a)
 
-#ifdef _SLEEP_PERCHANCE_TO_DREAM
+#ifdef _USE_DEEP_SLEEP
 // default sample period - 15 mins
 #define _SAMPLE_INTERVAL_M	(60)
 #define _AP_SLEEP_TIMEOUT			_AP_SLEEP_AFTER_M(2)
@@ -129,7 +129,7 @@ struct {
 
 
 
-#ifdef _SLEEP_PERCHANCE_TO_DREAM
+#ifdef _USE_DEEP_SLEEP
 unsigned long millisAtBoot = millis();
 #endif
 unsigned long lastSeenTraffic = 0;
@@ -140,17 +140,18 @@ unsigned long lastSeenTraffic = 0;
 // the setup function runs once when you press reset or power the board
 void setup() {
 
-	debugger.begin(9600);
+	debugger.begin(115200);
 	///Serial.setTimeout(2000);
 	debugger.printf(debug::dbImportant, "\n\rAwake. version %s\n\r", _MYVERSION);
 
-#ifndef	_SLEEP_PERCHANCE_TO_DREAM
+#ifndef	_USE_DEEP_SLEEP
 	delay(2000);
-#endif
-
+#else
+	// use the led to flag we're alive - off
 	pinMode(LED_BUILTIN, OUTPUT);
 	// builtin is wired wrong :/
 	digitalWrite(LED_BUILTIN, LOW);
+#endif
 
 
 	// 
@@ -188,7 +189,13 @@ void setup() {
 	// if we haven't been configured, wake up and offer a webserver to configure us
 	if (!config.wifi.configured)
 	{
-		wifiInstance.ConnectWifi(myWifiClass::modeAP, config.wifi);
+		debugger.println(debug::dbImportant, "Wifi not configured");
+
+
+		myWifiClass::wifiMode apResult=wifiInstance.ConnectWifi(myWifiClass::modeAP, config.wifi);
+
+		debugger.printf(debug::dbVerbose, "ConnectWifi %d\n\r", apResult);
+
 
 		// begin the servers
 
@@ -393,10 +400,8 @@ void setup() {
 		});
 
 
-
 		// serve up everthing in SPIFFS
-		debugger.println(debug::dbVerbose, "serving static pages");
-		//SPIFFS.openDir("/");
+		debugger.println(debug::dbVerbose, "Serving static pages ...");
 
 		fs::Dir dir = SPIFFS.openDir("/");
 		while (dir.next()) {
@@ -408,28 +413,35 @@ void setup() {
 
 		}
 
+
 		debugger.println(debug::dbVerbose, "serving static pages END");
 
 	}
 	else
 	{ 
+		debugger.printf(debug::dbInfo, "Wifi configured");
 		wifiInstance.ConnectWifi(myWifiClass::modeSTA, config.wifi, false);
 	}
 
+
+	debugger.println(debug::dbVerbose, "Starting Wire ...");
 #ifdef _MOVE_SDASCL
 	Wire.begin(D4, D3);
 #else
-	Wire.begin(D2, D1);
+	Wire.begin(SDA, SCL);
 #endif
+
 
 #ifdef	_SCAN_I2C
 
+	debugger.println(debug::dbVerbose, "Scanning I2C ...");
 	ScanI2C();
 
 #endif
 
 
 
+	debugger.println(debug::dbVerbose, "Starting BME ...");
 	bme.begin();
 	//lux.setAutomaticMode();
 
@@ -447,6 +459,7 @@ void setup() {
 		break;
 	}
 
+	debugger.println(debug::dbVerbose, "LastSeenTraffic check ...");
 	lastSeenTraffic = millis();
 
 }
@@ -483,7 +496,7 @@ bool readConfig()
 	else
 		config.samplePeriodMins = root["samplePeriodMin"];
 
-#ifndef _SLEEP_PERCHANCE_TO_DREAM
+#ifndef _USE_DEEP_SLEEP
 	config.samplePeriodMins = 3;
 #else
 	config.samplePeriodMins = 15;
@@ -628,6 +641,7 @@ DynamicJsonBuffer jsonHTTPsend;
 
 #ifdef _SAMPLE_BASED_ON_LIPO
 
+// given an exit voltage (1) how long should we sleep (2) in seconds before we wake
 struct { float lipo; unsigned delay; } samplePeriods[] = {
 	//{ 4.15, 1 },
 	//{ 4.10, 2 },
@@ -636,7 +650,7 @@ struct { float lipo; unsigned delay; } samplePeriods[] = {
 	//{ 4.02, 15 },
 	{ 4.0, 5 },
 	{ 3.90, 30 },
-	{ 0, 60 }
+	{ 0, 600 }
 };
 #endif
 
@@ -644,30 +658,40 @@ struct { float lipo; unsigned delay; } samplePeriods[] = {
 // the loop function runs over and over again until power down or reset
 void loop() 
 {
+
+
 	// if we haven't completed config, handle the server exclusively
 	if (wifiInstance.currentMode!=myWifiClass::wifiMode::modeSTA && wifiInstance.currentMode != myWifiClass::wifiMode::modeSTA_unjoined)
 	{
+
 		// depends, if we're AP we're fresh out of box, so we should give them time
 		// if we're STAAP then we were just being polite back there, so kill early
 
-		unsigned long sleepTimeOut = _AP_SLEEP_TIMEOUT, sleepTime= _AP_SLEEP_TIMEOUT_FOREVER;
+		unsigned long timeBeforeWeSleep = _AP_SLEEP_TIMEOUT, sleepTime= _AP_SLEEP_TIMEOUT_FOREVER;
 		String reason("last activity");
 
 		switch (wifiInstance.currentMode)
 		{
 		case myWifiClass::wifiMode::modeAP:
-			sleepTimeOut = _AP_SLEEP_TIMEOUT_AP;
+			// we're an AP - we're ready to configure
+			timeBeforeWeSleep = _AP_SLEEP_TIMEOUT_AP;
+#ifdef _USE_DEEP_SLEEP
 			sleepTime = _AP_SLEEP_TIMEOUT_FOREVER;
+#else
+			sleepTime = _AP_SLEEP_AFTER_S(20);
+#endif
 			reason="AP Mode";
 			break;
 		case myWifiClass::wifiMode::modeSTAandAP:
-			sleepTimeOut = _AP_SLEEP_TIMEOUT_STAAP;
+			// we're configured, and showingoff
+			timeBeforeWeSleep = _AP_SLEEP_TIMEOUT_STAAP;
 			sleepTime = _AP_SLEEP_AFTER_S(20);
-			reason="AP_STA Mode";
+			reason="AP_STA_AP Mode";
 			break;
 		// not worried about - just here for the preparser
 		case myWifiClass::modeOff:
 		case myWifiClass::modeSTA:
+			// we shouldn't get here - but this is SOP
 		case myWifiClass::modeSTA_unjoined:
 		case myWifiClass::modeSTAspeculative:
 		case myWifiClass::modeCold:
@@ -675,25 +699,35 @@ void loop()
 			break;
 		}
 
-		if (millis() - lastSeenTraffic > sleepTimeOut)
+		// we are running on battery, so we have to sleep when we can
+
+		if (millis() - lastSeenTraffic > timeBeforeWeSleep)
 		{
 			debugger.printf(debug::dbImportant, "%s deadline exceeded - battery saving - sleeping %lu ms\n\r",reason.c_str(),sleepTime);
-#ifdef _SLEEP_PERCHANCE_TO_DREAM
+#ifdef _USE_DEEP_SLEEP
 			GoToSleep(sleepTime);
 #else
+			// sleep for less time ...
 			delay(sleepTime);
+			// and reset traffic on the way out
+			lastSeenTraffic = millis();
+			return;
 #endif
 		}
+
+		// to get this far, we've either ...
 		wifiInstance.server.handleClient();
 		return;
 	}
+
 
 	unsigned long millisAtStart = millis();
 
 	debugger.printf(debug::dbInfo, "IP address: %s GW %s\n\r", WiFi.localIP().toString().c_str(),WiFi.gatewayIP().toString().c_str());
 
+	// do the data gather
 	int millimetres, numSamples, status;
-	ultra.GetReading(millimetres, numSamples, status);
+	bool ultraReading=ultra.GetReading(millimetres, numSamples, status);
 
 
 	// end server
@@ -708,17 +742,21 @@ void loop()
 	JsonObject &dataNow = jsonBuffer.createObject();
 
 	dataNow["iter"] = ++config.iteration;
-	dataNow["distCM"] = millimetres /10;
+	if (ultraReading)
+	{
+		dataNow["distMM"] = millimetres;
+	}
 	dataNow["tempC"] = temp;
 	dataNow["humid%"] = humidity;
 	dataNow["pressMB"] = pressure;
 	dataNow["lux"] = readLux();
 
 	float voltOnLipo = readLIPOvoltage();
-	dataNow["lipo"] = voltOnLipo;
+	dataNow["lipoV"] = voltOnLipo;
 
 #ifdef _SAMPLE_BASED_ON_LIPO
 
+	// start with "an hour" ... and work out what it should be
 	config.samplePeriodMins = 60;
 
 	for (unsigned each = 0; each < sizeof(samplePeriods) / sizeof(samplePeriods[0]); each++)
@@ -902,10 +940,13 @@ void loop()
 
 
 
-
+#ifdef	_USE_DEEP_SLEEP
+	// use the led to flag we're alive - off
 	digitalWrite(LED_BUILTIN, HIGH);
 
-#ifdef _SLEEP_PERCHANCE_TO_DREAM
+#endif
+
+#ifdef _USE_DEEP_SLEEP
 	// turn power off
 	debugger.printf(debug::dbImportant, "Awake for %lu ms\n\r",millis()-millisAtBoot);
 	GoToSleep(millisToSleep);
